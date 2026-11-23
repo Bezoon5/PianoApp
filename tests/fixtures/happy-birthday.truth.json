@@ -1,0 +1,16 @@
+{
+  "title": "Happy Birthday",
+  "systems": 3, "staves": 6, "parts": ["Piano"], "key": -1, "time": [3, 4], "measures": 9,
+  "notes": {
+    "treble": [
+      ["C4e","C4e"], ["D4q","C4q","C4+F4q"], ["C4+E4h","C4e","C4e"],
+      ["D4q","C4q","C4+G4q"], ["C4+F4h","C4e","C4e"], ["C5q","A4q","F4q"],
+      ["C4+E4q","B3+D4q","B4e","B4e"], ["A4q","F4q","C4+G4q"], ["C4+F4h"]
+    ],
+    "bass": [
+      ["Rq"], ["F3+A3h","F3q"], ["C3h","C3q"],
+      ["C3q","D3q","E3q"], ["F3h","F3q"], ["F3+A3h","F3q"],
+      ["B2h","B2q"], ["F3+C4h","E3q"], ["F3h"]
+    ]
+  }
+}
