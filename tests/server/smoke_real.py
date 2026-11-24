@@ -1,6 +1,7 @@
 """Smoke test against a running recognition server with the real homr.
 Usage: python3 tests/server/smoke_real.py http://localhost:7860 image.png [image2.png ...]
-Set SAVE_DIR to keep each MusicXML result (CI uploads them as an artifact).
+Set SAVE_DIR to keep each MusicXML result (CI uploads them as an artifact);
+set DUMP_XML=1 to also print them into the log.
 Prints what was recognised and fails if a page yields no music."""
 import os, re, sys, time, requests
 base, images = sys.argv[1].rstrip('/'), sys.argv[2:]
@@ -23,6 +24,8 @@ for img in images:
     if os.environ.get('SAVE_DIR'):
         os.makedirs(os.environ['SAVE_DIR'], exist_ok=True)
         with open(os.path.join(os.environ['SAVE_DIR'], os.path.splitext(os.path.basename(img))[0] + '.musicxml'), 'w') as f: f.write(xml)
+    if os.environ.get('DUMP_XML'):
+        print('----- BEGIN MUSICXML %s' % os.path.basename(img)); print(xml); print('----- END MUSICXML')
     pos = re.findall(r'<!--[^>]*?imgpos[^>]*?-->', xml)
     print('  image positions: %d markers%s' % (len(pos), (', e.g. ' + ' '.join(pos[:3])) if pos else ''))
     i = xml.find('<note')

@@ -23,7 +23,7 @@ jobs:
       - run: docker run -d --name rec -p 7860:7860 -e ALLOWED_ORIGINS=http://localhost piano-recogniser
       - run: pip install requests
       - run: python tests/server/smoke_real.py http://localhost:7860 tests/browser/happy.png tests/browser/shadow.png tests/browser/together.png
-        env: {SAVE_DIR: homr-output}
+        env: {SAVE_DIR: homr-output, DUMP_XML: '1'}
       - if: always()
         uses: actions/upload-artifact@v4
         with: {name: homr-output, path: homr-output, if-no-files-found: ignore}
