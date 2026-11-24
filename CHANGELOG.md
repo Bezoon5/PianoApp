@@ -1,5 +1,9 @@
 # Changelog
 
+## 6.1.1: built-in recognition server
+- AI recognition works out of the box: the app uses the Piano Companion recognition server on Google Cloud Run, with no setup in Settings. Settings → Photo recognition can still point to another server; clearing the box returns to the built-in one.
+- Deploy script grants the build permission new Google Cloud projects lack.
+
 ## 6.1.0: AI recognition for photos
 New
 - **AI recognition (homr)**: photos and PDF pages can be read by [homr](https://github.com/liebharc/homr), a neural-network music recogniser built for camera pictures, running on a small server you deploy once (`server/`, free on Hugging Face Spaces). Results go through the same review screen: measures that don't add up are flagged, every note can be edited, and the piece saves for practice as before.

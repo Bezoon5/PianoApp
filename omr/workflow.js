@@ -25,7 +25,10 @@
     get: k => { try { return localStorage.getItem(k) || ''; } catch (e) { return ''; } },
     set: (k, v) => { try { if (v) localStorage.setItem(k, v); else localStorage.removeItem(k); } catch (e) { /* private mode */ } }
   };
-  function homrConfig() { return { url: H ? H.normaliseUrl(store.get('pc-homr-url')) : '', key: store.get('pc-homr-key') }; }
+  // Built-in recognition server (server/, deployed on Google Cloud Run). Settings can override it;
+  // tests set window.PC_DEFAULT_HOMR_URL = '' so they never call the real server.
+  const DEFAULT_HOMR_URL = typeof window.PC_DEFAULT_HOMR_URL === 'string' ? window.PC_DEFAULT_HOMR_URL : 'https://piano-recogniser-4nnhn44cva-ew.a.run.app';
+  function homrConfig() { return { url: H ? H.normaliseUrl(store.get('pc-homr-url') || DEFAULT_HOMR_URL) : '', key: store.get('pc-homr-key') }; }
   /** 'homr' when a server is configured (unless the user picked the device), else 'device'. */
   function engine() {
     if (!H || !homrConfig().url) return 'device';
@@ -933,10 +936,20 @@
     const url = $('homrUrl'), key = $('homrKey'), st = $('homrStatus');
     if (!url) return;
     if (!H) { st.textContent = 'omr/homr.js did not load: upload the whole omr/ folder.'; return; }
-    url.value = store.get('pc-homr-url'); key.value = store.get('pc-homr-key');
-    const describe = () => { st.textContent = homrConfig().url ? 'Photos will be read by ' + homrConfig().url + '. Press Test connection to check it.' : 'Not set: photos use the basic on-device recogniser.'; };
+    url.value = store.get('pc-homr-url') || DEFAULT_HOMR_URL; key.value = store.get('pc-homr-key');
+    if (DEFAULT_HOMR_URL) url.placeholder = DEFAULT_HOMR_URL;
+    const describe = () => {
+      const u = homrConfig().url;
+      st.textContent = !u ? 'Not set: photos use the basic on-device recogniser.'
+        : u === H.normaliseUrl(DEFAULT_HOMR_URL) ? 'Using the built-in recognition server. Press Test connection to check it.'
+        : 'Photos will be read by ' + u + '. Press Test connection to check it. Clear the box to go back to the built-in server.';
+    };
     describe();
-    url.onchange = () => { const n = H.normaliseUrl(url.value); store.set('pc-homr-url', n); url.value = n; if (n) store.set('pc-omr-engine', 'homr'); describe(); if (state.step === 2) { renderEngines(); $('omrNext2').disabled = !canRecognise(); } };
+    url.onchange = () => {
+      const n = H.normaliseUrl(url.value), builtIn = !n || n === H.normaliseUrl(DEFAULT_HOMR_URL);
+      store.set('pc-homr-url', builtIn ? '' : n); url.value = n || DEFAULT_HOMR_URL;
+      if (n) store.set('pc-omr-engine', 'homr');
+      describe(); if (state.step === 2) { renderEngines(); $('omrNext2').disabled = !canRecognise(); } };
     key.onchange = () => { store.set('pc-homr-key', key.value.trim()); };
     $('homrTest').onclick = async () => {
       url.onchange(); key.onchange();

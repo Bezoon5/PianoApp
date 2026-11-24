@@ -162,8 +162,8 @@
   <label>Sound<select id="soundSel"><option value="piano">Grand piano (recorded samples)</option><option value="synth">Simple synth</option></select></label>
   <p id="soundStatus" class="muted">The grand piano loads the first time you play.</p>
   <h3>Photo recognition</h3>
-  <p class="muted">For reliable results from photos, connect a homr recognition server. Setup steps are in <code>server/README.md</code> in the project.</p>
-  <label>Server address<input id="homrUrl" placeholder="https://your-name-piano-recogniser.hf.space" inputmode="url" autocomplete="off" autocapitalize="off" spellcheck="false"></label>
+  <p class="muted">Photos are read by the AI recognition server built into the app. To use your own server instead, enter its address (setup steps: <code>server/README.md</code>).</p>
+  <label>Server address<input id="homrUrl" placeholder="https://piano-recogniser-….run.app" inputmode="url" autocomplete="off" autocapitalize="off" spellcheck="false"></label>
   <label>Key (only if your server uses one)<input id="homrKey" autocomplete="off" autocapitalize="off" spellcheck="false"></label>
   <div class="actions left"><button id="homrTest">Test connection</button></div>
   <p id="homrStatus" class="muted">Not set: photos use the basic on-device recogniser.</p>

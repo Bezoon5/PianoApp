@@ -18,7 +18,7 @@ async def main():
         if not await pg.evaluate("!!navigator.serviceWorker.controller"):
             await pg.reload(); await pg.evaluate("navigator.serviceWorker.ready")
         check('Service worker installed and controlling the page', await pg.evaluate("!!navigator.serviceWorker.controller"))
-        n = await pg.evaluate("caches.open('pc-shell-6.1.0').then(c => c.keys()).then(k => k.map(r => new URL(r.url).pathname))")
+        n = await pg.evaluate("caches.open('pc-shell-6.1.1').then(c => c.keys()).then(k => k.map(r => new URL(r.url).pathname))")
         check('App shell cached, including music/practice.js and omr/homr.js', len(n) >= 20 and any(x.endswith('music/practice.js') for x in n) and any(x.endswith('omr/homr.js') for x in n), len(n))
         await ctx.set_offline(True)
         await pg.reload(); await pg.wait_for_selector('#title.active')
