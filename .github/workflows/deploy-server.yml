@@ -1,11 +1,12 @@
-name: Deploy recognition server
+name: Deploy recognition server (Hugging Face)
 # Creates (first time) and updates the Hugging Face Space that runs server/.
 # Needs one repository secret: HF_TOKEN (a Hugging Face access token with "Write" permission).
 # Optional repository variable HF_SPACE_NAME (default: piano-recogniser).
+# Hugging Face now needs a PRO subscription for Docker Spaces, so this runs only when
+# started by hand (Actions > Deploy recognition server > Run workflow).
+# To deploy automatically on every change instead, add:
+#   push: {branches: [main], paths: ['server/**']}
 on:
-  push:
-    branches: [main]
-    paths: ['server/**', '.github/workflows/deploy-server.yml']
   workflow_dispatch: {}
 jobs:
   deploy:

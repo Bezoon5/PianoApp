@@ -15,7 +15,7 @@ A piano practice app for iPad and desktop browsers. Import music, follow the eng
 | **Built-in** | – | 25 public-domain Christmas melodies and Happy Birthday. |
 
 ### AI recognition for photos (recommended)
-Phone photos have shadows, tilt and page curl that the built-in recogniser can't handle reliably. For dependable results, run the small recognition server in [`server/`](server/README.md), which uses [homr](https://github.com/liebharc/homr). The free Hugging Face Spaces tier is enough; setup takes about 15 minutes. Then in the app: **Settings → Photo recognition**, paste the server address and press **Test connection**. When scanning, choose **AI recognition** in the Layout step (it becomes the default once a server is set). If the server is unreachable, the app says so and falls back to the on-device recogniser.
+Phone photos have shadows, tilt and page curl that the built-in recogniser can't handle reliably. For dependable results, run the small recognition server in [`server/`](server/README.md), which uses [homr](https://github.com/liebharc/homr). Google Cloud Run is recommended (normally within its free monthly allowance); setup takes about 15 minutes and one pasted command. Then in the app: **Settings → Photo recognition**, paste the server address and press **Test connection**. When scanning, choose **AI recognition** in the Layout step (it becomes the default once a server is set). If the server is unreachable, the app says so and falls back to the on-device recogniser.
 
 Tips for good photos: lay the page flat, fill the frame, use even light, and use **Camera app (sharper)** for a full-resolution photo.
 

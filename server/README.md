@@ -15,51 +15,62 @@ MusicXML** using [homr](https://github.com/liebharc/homr), a neural-network musi
 recogniser built for camera pictures. The app sends one page at a time and gets
 MusicXML back, which then goes through the app's review screen as before.
 
-The app is a static website, so the recogniser has to run somewhere else. Pick one
-of the options below. All of them use the `Dockerfile` in this folder.
+The app is a static website, so the recogniser has to run somewhere else.
+Google Cloud Run is recommended: it switches off when unused, and personal use
+normally stays within Google's monthly free allowance.
 
-## Option A0: automatic deploy from GitHub (recommended)
+## Option A: Google Cloud Run (recommended)
 
-The repository has a workflow (`.github/workflows/deploy-server.yml`) that creates
-the Hugging Face Space and keeps it up to date whenever `server/` changes.
+1. Go to <https://console.cloud.google.com> and sign in with a Google account.
+   Accept the terms. New accounts are offered a free trial with credit; a card
+   is required either way.
+2. Create a project: project picker at the top → **New project** → name it
+   `piano-recogniser` → **Create**. Make sure it is selected in the top bar.
+3. Turn on billing for it if asked (**Billing** → link your billing account).
+4. **Set a spending alert**: **Billing → Budgets & alerts → Create budget**,
+   amount e.g. £5, keep the default email alerts. (An alert warns you; it does
+   not stop charges by itself. The server is also capped at 2 copies.)
+5. Open **Cloud Shell**: the `>_` icon at the top right. A terminal opens at the
+   bottom of the page. Paste this line and press Enter:
 
-1. Create a free account at <https://huggingface.co>.
-2. On Hugging Face: **Settings → Access Tokens → Create new token**, choose
-   **Write**, name it `github-deploy`, and copy the token.
-3. On GitHub: repository **Settings → Secrets and variables → Actions →
-   New repository secret**. Name: `HF_TOKEN`. Paste the token. Save.
-4. On GitHub: **Actions → Deploy recognition server → Run workflow**.
-5. Open the finished run: its summary shows the **server address**. Wait 5–10
-   minutes for the first build on Hugging Face, then use the address in the app
-   (Settings → Photo recognition → Test connection).
+   ```bash
+   rm -rf PianoApp && git clone --depth 1 https://github.com/Bezoon5/PianoApp.git && bash PianoApp/server/deploy-cloudrun.sh
+   ```
 
-Never paste the token anywhere else (chat, code, issues). To use a different Space
-name, add a repository *variable* `HF_SPACE_NAME`.
+   If Cloud Shell asks to **Authorize**, allow it. The first deploy takes about
+   5–10 minutes and ends by printing the **server address**
+   (`https://piano-recogniser-….run.app`).
+6. In the app: **Settings → Photo recognition**, paste the address, press
+   **Test connection**.
 
-## Option A: Hugging Face Spaces by hand (free)
+To update the server after `server/` changes, open Cloud Shell and paste the
+same line again.
 
-1. Create a free account at <https://huggingface.co>.
-2. **New → Space**. Name it e.g. `piano-recogniser`, choose **Docker** as the SDK
-   and **Blank** as the template. The free *CPU basic* hardware (2 vCPU, 16 GB) is enough.
-3. Upload the four files from this folder (`Dockerfile`, `app.py`,
-   `requirements.txt`, `README.md`) using **Files → Add file → Upload files**.
-4. Wait for the build to finish (5–10 minutes the first time; it downloads the models).
-   The Space shows **Running** when it's ready.
-5. Your server address is `https://<your-username>-piano-recogniser.hf.space`.
-   Open `<address>/health` in a browser: you should see `{"ok": true, "engine": "homr", ...}`.
-6. In the app: **Settings → Photo recognition → Server address**, paste the address
-   and press **Test connection**.
+**Cost.** Cloud Run's monthly free allowance (CPU, memory and requests) covers
+roughly a few thousand pages. Storing the server image costs a few pence a month.
+The first page after the server has been idle takes longer while it starts.
 
-Free Spaces go to sleep after a period without use; the first page after that
-takes an extra minute or so while it wakes up.
+## Option B: Hugging Face Spaces ($9/month)
 
-## Option B: Google Cloud Run, Render, Fly.io
+Hugging Face now requires a **PRO subscription** to run Docker Spaces. With PRO,
+the workflow `.github/workflows/deploy-server.yml` deploys automatically:
 
-Deploy this folder as a Docker service. Give it **at least 4 GB of memory**
-(8 GB is safer for large pages) and a request timeout of **5 minutes or more**.
-The container listens on `$PORT` (default 7860).
+1. On Hugging Face: **Settings → Access Tokens → Create new token**, choose
+   **Write**, copy it.
+2. On GitHub: **Settings → Secrets and variables → Actions → New repository
+   secret**, name `HF_TOKEN`, paste the token.
+3. On GitHub: **Actions → Deploy recognition server (Hugging Face) → Run workflow**. The run
+   summary shows the server address.
 
-## Option C: your own computer (for testing)
+Never paste the token anywhere else (chat, code, issues).
+
+## Option C: other hosts
+
+Deploy this folder as a Docker service anywhere (Render, Fly.io, a VPS). Give it
+**at least 4 GB of memory** and a request timeout of **5 minutes or more**. The
+container listens on `$PORT` (default 7860).
+
+## Option D: your own computer (for testing)
 
 ```bash
 cd server
@@ -80,7 +91,7 @@ python app.py
 
 ## Settings
 
-Set these as environment variables (on Hugging Face: **Settings → Variables and secrets**).
+Set these as environment variables (Cloud Run: **Edit & deploy new revision → Variables**; Hugging Face: **Settings → Variables and secrets**).
 
 | Variable | Default | Meaning |
 |---|---|---|
@@ -94,8 +105,9 @@ Set these as environment variables (on Hugging Face: **Settings → Variables an
 
 ## How long does a page take?
 
-On the free 2-CPU Space, expect roughly **30 seconds to 2 minutes per page**
-depending on how dense the music is. A GPU makes it several times faster.
+On GitHub's 4-CPU test machines homr took about **7 seconds per page**. On Cloud
+Run with 2 CPUs expect roughly 10–30 seconds, plus up to a minute when the server
+has been idle and needs to start.
 
 ## Licence
 
