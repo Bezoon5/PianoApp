@@ -153,6 +153,7 @@ async def main():
 
         # 5. Falling notes: notes are drawn above the key they belong to, preference remembered
         ctx, pg, errs = await new_page(b, url)
+        if await pg.is_visible('#guide'): await pg.click('#guideDone')   # first-visit tips take room
         await pg.click('#fallToggle'); await pg.wait_for_timeout(300)
         check('falling notes: score hidden, road fills the space', await pg.evaluate("getComputedStyle(document.querySelector('.scorebox')).display") == 'none' and await pg.evaluate("document.getElementById('road').getBoundingClientRect().height") > 250)
         colour = await pg.evaluate("""(() => {

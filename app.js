@@ -149,6 +149,27 @@
     if (id === 'library') render();
   }
   $('#start').onclick = () => nav('library');
+
+  /* ------------------------------ Layout -------------------------------- */
+  const narrow = () => window.matchMedia ? window.matchMedia('(max-width: 700px)').matches : window.innerWidth <= 700;
+  // Tools panel: open by default on larger screens, folded away on phones; the choice is remembered.
+  function setToolsOpen(open, remember) {
+    $('#practice').classList.toggle('tools-closed', !open);
+    $('#toolsBtn').setAttribute('aria-expanded', open ? 'true' : 'false');
+    $('#toolsBtn').classList.toggle('primary', open && narrow());
+    if (remember) localStorage.setItem('pc-tools-open', open ? '1' : '0');
+  }
+  const toolsPref = () => { const v = localStorage.getItem('pc-tools-open'); return v ? v === '1' : !narrow(); };
+  setToolsOpen(toolsPref());
+  $('#toolsBtn').onclick = () => setToolsOpen($('#practice').classList.contains('tools-closed'), true);
+  // Library on phones: one "Add music" button opens the import choices.
+  $('#addMusic').onclick = () => {
+    const open = !$('.lead').classList.contains('adding');
+    $('.lead').classList.toggle('adding', open); $('#addMusic').setAttribute('aria-expanded', open ? 'true' : 'false');
+  };
+  // First visit to the practice screen: three quick tips (not a pop-up, so nothing is blocked).
+  function showGuide() { if (!localStorage.getItem('pc-guide-seen')) $('#guide').hidden = false; }
+  $('#guideDone').onclick = () => { $('#guide').hidden = true; localStorage.setItem('pc-guide-seen', '1'); };
   document.querySelectorAll('[data-nav]').forEach(b => b.onclick = () => nav(b.dataset.nav));
 
   /* ------------------------------ Library ------------------------------- */
@@ -323,6 +344,7 @@
     $('#loopTo').value = segs[Math.min(segs.length - 1, fi + 3)] ? segs[Math.min(segs.length - 1, fi + 3)].number : 1;
     toolStatus('');
     nav('practice');
+    showGuide();
     requestAnimationFrame(() => { piano(+$('#range').value); centerKeys(s); showView(); });
     setFalling(fallingOn);
     if (window.Tone && soundPref === 'piano') loadSampler();
@@ -534,7 +556,7 @@
       const k = document.createElement('button'), black = bk.has(m % 12);
       k.className = 'key ' + (black ? 'black' : 'white'); k.dataset.m = m;
       k.setAttribute('aria-label', 'MIDI note ' + m);
-      if (black) k.style.left = 'calc(' + wh.filter(x => x < m).length + ' * var(--ww) - 9px)';
+      if (black) k.style.left = 'calc(' + wh.filter(x => x < m).length + ' * var(--ww) - var(--bw) / 2)';
       k.onpointerdown = async ev => {
         ev.preventDefault();
         const tok = ++pressSeq;
@@ -1029,7 +1051,7 @@
 
   /* Sheet music view (Verovio) with simple-view fallback -------------------- */
   let viewPref = localStorage.getItem('pc-view') || 'sheet';
-  function setViewButton() { $('#viewToggle').textContent = viewPref === 'sheet' ? 'Simple view' : 'Sheet music'; }
+  function setViewButton() { $('#viewToggle').innerHTML = viewPref === 'sheet' ? 'Simple<span class="long"> view</span>' : 'Sheet<span class="long"> music</span>'; }
   setViewButton();
   $('#viewToggle').onclick = () => { viewPref = viewPref === 'sheet' ? 'simple' : 'sheet'; localStorage.setItem('pc-view', viewPref); setViewButton(); showView(); };
   function useSimple(note) {

@@ -1,5 +1,16 @@
 # Changelog
 
+## 6.4.0: tidier layout, especially on phones
+New
+- **Practice screen:** one row with the mode switch (Listen | Wait | Play along), Play, Stop, 🎤 and Falling notes. Tempo, hands, loop, speed trainer, metronome, count-in, timing, sheet/simple view and recording move into a **⚙︎ Tools** panel: open by default on larger screens, folded away on phones, and the app remembers your choice.
+- **One status line** for the bar, score, microphone and messages, which stays visible when Tools is closed.
+- **Bigger keys on phones** (44 px wide instead of 31), still scrolled to the piece's notes.
+- **Library on phones:** a single **＋ Add music** button opens the import choices instead of five large tiles.
+- **Scan review on phones:** one view at a time (Recognised first, or the photo) instead of a cramped side-by-side view.
+- **Quick tips** the first time you open a piece (shown once, and they don't block anything).
+Other
+- Labels shorten on narrow screens (Wait, Play, ▶) and the practice area fills the screen, in portrait and landscape.
+
 ## 6.3.1: lock the recognition server to your devices
 New
 - **Recognition key:** `server/lock-server.sh` locks the AI recognition server with a key in one Cloud Shell line and prints a set-up link. Opening the link on a device saves the key there and removes it from the address bar.

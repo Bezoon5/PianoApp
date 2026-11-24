@@ -53,6 +53,9 @@ jobs:
       - name: Microphone, play along, recording, falling notes
         if: success() || failure()
         run: python -u tests/browser/practice63.py
+      - name: Phone and desktop layout
+        if: success() || failure()
+        run: python -u tests/browser/layout.py
       - name: Backups
         if: (success() || failure()) && hashFiles('tests/browser/backup.py') != ''
         run: python -u tests/browser/backup.py

@@ -34,7 +34,8 @@
   <main>
     <div class="lead">
       <div><span>MUSIC SELECT</span><h1>Choose or add music</h1><p>MusicXML gives the most accurate result. Scanned music (camera, Photos or PDF) is reviewed and corrected before practising.</p></div>
-      <div class="imports">
+      <button id="addMusic" class="primary addmusic" aria-expanded="false" aria-controls="imports">＋ Add music</button>
+      <div class="imports" id="imports">
         <button id="xml" class="best">🎵<b>MusicXML</b><small>Most accurate</small></button>
         <button id="cam">📷<b>Camera</b><small>Scan pages</small></button>
         <button id="photos">🖼<b>Photos</b><small>Select images</small></button>
@@ -50,19 +51,33 @@
 </section>
 
 <section id="practice" class="screen">
-  <header><button data-nav="library">← Music</button><div><b id="songTitle">Practice</b><small id="songMeta"></small></div><div><button id="play" class="primary">Play</button><button id="stop">Stop</button></div></header>
-  <div class="transport"><button id="listen" class="primary">Listen</button><button id="wait">Wait mode</button><button id="along" title="Play at tempo; each note is marked on time, early, late, missed or wrong">Play along</button><label>Tempo <input id="tempo" type="range" min="30" max="220"><output id="tempoOut"></output></label><button id="viewToggle">Simple view</button><button id="fallToggle" aria-pressed="false" title="Notes fall onto the keys">Falling notes</button><span id="scoreOut"></span><span id="measure">Measure 1</span></div>
-  <div class="tools">
+  <header><button data-nav="library">← Music</button><div><b id="songTitle">Practice</b><small id="songMeta"></small></div><button id="toolsBtn" aria-expanded="true" aria-controls="toolsPanel" title="Hands, loop, tempo, metronome, recording">⚙︎ Tools</button></header>
+  <div class="transport">
+    <div class="seg modes" role="group" aria-label="Practice mode"><button id="listen" class="primary">Listen</button><button id="wait" title="The music waits for you to play the right notes">Wait<span class="long"> mode</span></button><button id="along" title="Play at tempo; each note is marked on time, early, late, missed or wrong">Play<span class="long"> along</span></button></div>
+    <span class="tgroup"><button id="play" class="primary" aria-label="Play">▶<span class="long"> Play</span></button><button id="stop" aria-label="Stop">■<span class="long"> Stop</span></button></span>
+    <span class="tgroup"><button id="micBtn" aria-pressed="false" title="Listen to your piano through the microphone">🎤<span class="long"> Mic</span></button><span id="micMeter" class="meter" hidden><i></i></span></span>
+    <span class="tgroup views"><button id="fallToggle" aria-pressed="false" title="Notes fall onto the keys">Falling<span class="long"> notes</span></button></span>
+  </div>
+  <div id="toolsPanel" class="tools">
+    <label class="tempo">Tempo <input id="tempo" type="range" min="30" max="220"><output id="tempoOut"></output></label>
     <label>Hands <select id="handSel"><option value="both">Both</option><option value="right">Right only</option><option value="left">Left only</option></select></label>
     <span class="loopctl"><button id="loopBtn" aria-pressed="false">⟲ Loop</button><label>bars <input id="loopFrom" inputmode="numeric" value="1"></label><label>to <input id="loopTo" inputmode="numeric" value="4"></label></span>
     <label class="check"><input id="trainer" type="checkbox"> Speed trainer</label>
     <label class="check"><input id="metro" type="checkbox"> Metronome</label>
     <label class="check"><input id="countIn" type="checkbox"> Count-in</label>
     <label class="along-only">Timing <select id="tolSel"><option value="strict">Strict</option><option value="normal">Normal</option><option value="relaxed">Relaxed</option></select></label>
-    <button id="micBtn" aria-pressed="false" title="Listen to your piano through the microphone">🎤 Mic</button><span id="micMeter" class="meter" hidden><i></i></span>
-    <button id="recBtn" title="Record what you play">● Record</button><button id="takesBtn">Takes</button>
-    <span id="micStatus" aria-live="polite"></span>
-    <span id="toolStatus" aria-live="polite"></span>
+    <button id="viewToggle" title="Switch between engraved sheet music and the simple view">Simple view</button>
+    <span class="tgroup"><button id="recBtn" title="Record what you play">● Record</button><button id="takesBtn">Takes</button></span>
+  </div>
+  <div class="statusline" aria-live="polite"><span id="measure">Measure 1</span><span id="scoreOut"></span><span id="micStatus"></span><span id="toolStatus"></span></div>
+  <div id="guide" class="guide" hidden>
+    <b>Quick tips</b>
+    <ul>
+      <li><b>Listen</b> plays the piece, <b>Wait</b> pauses until you play the right notes, <b>Play along</b> keeps time and marks each note.</li>
+      <li>No MIDI keyboard (iPhone, iPad)? Tap <b>🎤</b> and the app listens to your piano.</li>
+      <li><b>⚙︎ Tools</b> has tempo, hands, loop, metronome, sheet or simple view, and recording.</li>
+    </ul>
+    <button id="guideDone" class="primary">Got it</button>
   </div>
   <main class="practice">
     <div class="scorebox"><canvas id="score" hidden></canvas><div id="engraved" class="engraved"></div><p id="notationNote"></p></div>
