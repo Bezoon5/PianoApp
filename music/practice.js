@@ -6,6 +6,8 @@
  *   Metronome        : clicks, countIn
  *   Progress         : addSession, summarise, streak, trickiest, relativeDay
  *   Backup           : makeBackup, readBackup, mergeHistory, mergeSongs, unbackedUp
+ *   Play along       : timingJudge (on time / early / late / missed / wrong)
+ *   Recording        : takeToMidi (a recorded take as a standard MIDI file)
  */
 (function (root, factory) {
   if (typeof module === 'object' && module.exports) module.exports = factory();
@@ -190,5 +192,75 @@
     return (songs || []).filter(s => !s.builtin && (!lastBackup || (s.updatedAt || 0) > lastBackup));
   }
 
-  return { inHand, waitEvents, accompaniment, resolveLoop, speedTrainer, clickStep, clicks, countIn, addSession, summarise, streak, trickiest, relativeDay, dayKey, makeBackup, readBackup, mergeHistory, mergeSongs, unbackedUp };
+  /* -------------------------------- Play along -------------------------------- */
+  const TOLERANCE = { strict: 0.05, normal: 0.09, relaxed: 0.14 };   // seconds counted as "on time"
+  /**
+   * Judges notes played along with the music. expected: [{ beat, midi, ... }];
+   * opts: { spb (seconds per beat), tolerance: 'strict'|'normal'|'relaxed' or seconds }.
+   * press(midi, beat) -> { result: 'on'|'early'|'late'|'wrong', ms, note }
+   * sweep(beat)       -> notes now too late to play, marked missed
+   */
+  function timingJudge(expected, opts) {
+    opts = opts || {};
+    const spb = opts.spb || 0.6;
+    const tol = typeof opts.tolerance === 'number' ? opts.tolerance : TOLERANCE[opts.tolerance || 'normal'];
+    const windowS = Math.max(0.2, Math.min(0.4, spb * 0.5), tol * 2);   // how far off still counts as that note
+    const notes = expected.map((n, i) => Object.assign({}, n, { i, result: null, ms: null }));
+    const extra = [];
+    function press(midi, beat) {
+      let best = null, bd = Infinity;
+      for (const n of notes) {
+        if (n.result || n.midi !== midi) continue;
+        const d = Math.abs(beat - n.beat) * spb;
+        if (d <= windowS && d < bd) { bd = d; best = n; }
+      }
+      if (!best) { const w = { result: 'wrong', midi, beat, ms: null }; extra.push(w); return w; }
+      const ms = Math.round((beat - best.beat) * spb * 1000);
+      best.ms = ms;
+      best.result = Math.abs(ms) <= tol * 1000 ? 'on' : ms < 0 ? 'early' : 'late';
+      return { result: best.result, ms, note: best };
+    }
+    function sweep(beat) {
+      const out = [];
+      for (const n of notes) if (!n.result && (beat - n.beat) * spb > windowS) { n.result = 'missed'; out.push(n); }
+      return out;
+    }
+    function summary() {
+      const c = { on: 0, early: 0, late: 0, missed: 0, wrong: extra.length };
+      let sum = 0, k = 0;
+      notes.forEach(n => { if (n.result && c[n.result] != null) c[n.result]++; if (n.ms != null) { sum += n.ms; k++; } });
+      const played = c.on + c.early + c.late;
+      return Object.assign(c, {
+        total: notes.length, played,
+        meanMs: k ? Math.round(sum / k) : null,                                   // < 0: rushing, > 0: dragging
+        timing: played ? Math.round(c.on / played * 100) : null,                 // on time, of the notes played
+        accuracy: notes.length + c.wrong ? Math.round(played / (notes.length + c.wrong) * 100) : null
+      });
+    }
+    return { press, sweep, summary, notes, windowMs: Math.round(windowS * 1000), toleranceMs: Math.round(tol * 1000) };
+  }
+
+  /* -------------------------------- Recording --------------------------------- */
+  /**
+   * A take ([{ t: ms, midi, vel, on: bool }]) as a format-0 standard MIDI file
+   * (Uint8Array) at 120 BPM, 480 ticks per beat, so 1 ms = 0.96 ticks.
+   */
+  function takeToMidi(events, name) {
+    const bytes = [], vlq = v => { const st = [v & 0x7f]; while ((v >>= 7)) st.unshift((v & 0x7f) | 0x80); bytes.push(...st); };
+    const meta = (type, data) => { bytes.push(0, 0xff, type); vlq(data.length); bytes.push(...data); };
+    meta(0x51, [0x07, 0xa1, 0x20]);                                                 // 500000 µs per beat = 120 BPM
+    if (name) meta(0x03, Array.from(unescape(encodeURIComponent(String(name).slice(0, 60)))).map(ch => ch.charCodeAt(0)));
+    let last = 0;
+    events.slice().sort((a, b) => a.t - b.t || (a.on ? 1 : -1)).forEach(e => {
+      const tick = Math.max(last, Math.round(e.t * 0.96));
+      vlq(tick - last); last = tick;
+      bytes.push(e.on ? 0x90 : 0x80, Math.max(0, Math.min(127, e.midi)), e.on ? Math.max(1, Math.min(127, Math.round((e.vel || 0.7) * 127))) : 64);
+    });
+    bytes.push(0, 0xff, 0x2f, 0);
+    const head = [0x4d, 0x54, 0x68, 0x64, 0, 0, 0, 6, 0, 0, 0, 1, 0x01, 0xe0];
+    const len = bytes.length, track = [0x4d, 0x54, 0x72, 0x6b, (len >>> 24) & 255, (len >>> 16) & 255, (len >>> 8) & 255, len & 255];
+    return new Uint8Array(head.concat(track, bytes));
+  }
+
+  return { inHand, waitEvents, accompaniment, resolveLoop, speedTrainer, clickStep, clicks, countIn, addSession, summarise, streak, trickiest, relativeDay, dayKey, makeBackup, readBackup, mergeHistory, mergeSongs, unbackedUp, timingJudge, takeToMidi, TOLERANCE };
 });
