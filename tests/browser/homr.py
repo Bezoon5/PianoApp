@@ -203,7 +203,34 @@ async def main():
         check('built-in server: clearing the box goes back to it', await pg.evaluate("localStorage.getItem('pc-homr-url')") is None and await pg.input_value('#homrUrl') == rec_url)
         await ctx.close()
 
-        # 6. Recognition failure on the server (422) also falls back
+        # 6. Real homr output with note positions: bars on the photo, tapping the photo selects notes
+        rec2, rec2_url = start_recogniser(app, STUB_XML=os.path.join(ROOT, 'tests', 'fixtures', 'homr-real-happy.musicxml'))
+        ctx, pg, errs = await new_page(b, app)
+        await set_server(pg, rec2_url, test=False)
+        await to_layout(pg, os.path.join(HERE, 'happy.png'))
+        await pg.wait_for_function("!document.getElementById('omrNext2').disabled", timeout=20000)
+        await pg.click('#omrNext2')
+        await pg.wait_for_function("/AI recognition: /.test(document.getElementById('omrReviewStatus').textContent)", timeout=60000)
+        info = await pg.evaluate("(() => { const s = PCOMR.state.score, p = PCOMR.state.pages[0].sentCanvas; return { boxes: s.measures.filter(m => m.photoBox).length, n: s.measures.length, w: p.width, h: p.height }; })()")
+        check('real homr output: a box on the photo for every bar', info['boxes'] == info['n'] == 9 and info['w'] == 409 and info['h'] == 446, info)
+        hint = await pg.text_content('#omrSelInfo')
+        check('real homr output: hint says either view can be tapped', 'either view' in hint, hint)
+        async def tap_photo(x, y):
+            pt = await pg.evaluate("([x, y]) => { const c = document.getElementById('omrOrig'), r = c.getBoundingClientRect(), k = r.width / PCOMR.state.pages[0].sentCanvas.width; return [r.left + x * k, r.top + y * k]; }", [x, y])
+            await pg.mouse.click(pt[0], pt[1])
+        await tap_photo(155, 108)   # homr: D4, first note of bar 1 (after the pickup)
+        sel = await pg.text_content('#omrSelInfo')
+        picked = await pg.evaluate("(() => { const f = PCOMR.state.sel && OMRModel.findEvent(PCOMR.state.score, PCOMR.state.sel.eventId); return f ? [PCOMR.state.score.measures.indexOf(f.measure), f.event.notes.map(n => n.photo && [n.photo.x, n.photo.y])] : null; })()")
+        check('tapping a note on the photo selects that note', picked and picked[0] == 1 and [155, 108] in picked[1] and 'D4' in sel, (picked, sel))
+        blue = await pg.evaluate("(() => { const c = document.getElementById('omrOrig'), g = c.getContext('2d'), k = c.width / PCOMR.state.pages[0].sentCanvas.width; const b = PCOMR.state.score.measures[1].photoBox, x = Math.round(((b.x0 + b.x1) / 2) * k), y = Math.round(b.y0 * k) + 1; const d = g.getImageData(x, y - 2, 1, 5).data; for (let i = 0; i < d.length; i += 4) if (d[i + 2] > 180 && d[i] < 90) return true; return false; })()")
+        check('the selected bar is outlined on the photo', blue)
+        await tap_photo(4, 4)   # top-left corner, outside every bar
+        check('tapping empty paper clears the selection', await pg.evaluate("PCOMR.state.sel") is None)
+        check('no page errors (photo positions)', not errs, errs)
+        await ctx.close()
+        rec2.terminate(); rec2.wait()
+
+        # 7. Recognition failure on the server (422) also falls back
         rec.terminate(); rec.wait()
         rec, rec_url = start_recogniser(app, STUB_MODE='fail')
         ctx, pg, errs = await new_page(b, app)
