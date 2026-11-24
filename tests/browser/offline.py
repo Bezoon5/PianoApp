@@ -4,6 +4,9 @@ import asyncio, sys
 from playwright.async_api import async_playwright
 BASE = sys.argv[1] if len(sys.argv) > 1 else 'http://127.0.0.1:8080/index.html'
 CHROME = sys.argv[2] if len(sys.argv) > 2 else None
+# The cache name follows the service worker's VERSION (one place to change it).
+import os, re as _re
+APP_VERSION = _re.search(r"const VERSION = '([^']+)'", open(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'sw.js')).read()).group(1)
 res = []
 def check(n, ok, d=''): res.append(bool(ok)); print(('PASS ' if ok else 'FAIL ') + n + (' | ' + str(d)[:150] if d != '' else ''))
 async def main():
@@ -18,7 +21,7 @@ async def main():
         if not await pg.evaluate("!!navigator.serviceWorker.controller"):
             await pg.reload(); await pg.evaluate("navigator.serviceWorker.ready")
         check('Service worker installed and controlling the page', await pg.evaluate("!!navigator.serviceWorker.controller"))
-        n = await pg.evaluate("caches.open('pc-shell-6.1.1').then(c => c.keys()).then(k => k.map(r => new URL(r.url).pathname))")
+        n = await pg.evaluate("caches.open('pc-shell-" + APP_VERSION + "').then(c => c.keys()).then(k => k.map(r => new URL(r.url).pathname))")
         check('App shell cached, including music/practice.js and omr/homr.js', len(n) >= 20 and any(x.endswith('music/practice.js') for x in n) and any(x.endswith('omr/homr.js') for x in n), len(n))
         await ctx.set_offline(True)
         await pg.reload(); await pg.wait_for_selector('#title.active')
