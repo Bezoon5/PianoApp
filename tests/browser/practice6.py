@@ -158,7 +158,7 @@ async def main():
         await (await fc.value).set_files(path); await pg.wait_for_timeout(500)
         rs = await pg.inner_text('#backupStatus'); await pg.click('#settingsDone'); await pg.wait_for_timeout(300)
         back = pg.locator('#songs .card', has_text='Two Hands (renamed)')
-        check('Restore brings back the piece and its history', 'Restored 1 piece' in rs and await back.count() == 1 and (await back.locator('.progress').inner_text()).startswith('Practised 2×'), rs)
+        check('Restore brings back the piece and its history', 'Restored: 1 new piece' in rs and await back.count() == 1 and (await back.locator('.progress').inner_text()).startswith('Practised 2×'), rs)
         bad = os.path.join(HERE, 'not-a-backup.json'); open(bad, 'w').write('{"hello": 1}')
         await pg.click('#settings')
         async with pg.expect_file_chooser() as fc: await pg.click('#restoreBtn')
