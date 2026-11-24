@@ -1,4 +1,4 @@
-# Piano Companion 6.1
+# Piano Companion 6.2
 
 **Live app:** https://bezoon5.github.io/PianoApp
 
@@ -60,9 +60,10 @@ tests/                              Node tests, fixtures, browser suites, Verovi
 ## Run and test
 ```
 npm start                                   # http://localhost:8080
-npm test                                    # 66 Node tests (all suites also run on GitHub for every pull request)
+npm test                                    # 71 Node tests (all suites also run on GitHub for every pull request)
 python3 tests/server/test_server.py         # recognition server API (stub homr; needs starlette, uvicorn, python-multipart, requests)
-python3 tests/browser/homr.py               # AI recognition end to end (Playwright), 25 checks
+python3 tests/browser/homr.py               # AI recognition end to end (Playwright), 36 checks
+python3 tests/browser/backup.py             # backups: reminder, send, merging restore, 14 checks
 pip install verovio && python3 tests/verovio_check.py
 python3 tests/browser/server.py 8080 &      # browser suites (Playwright)
 python3 tests/browser/practice6.py http://127.0.0.1:8080/index.html   # 29 checks

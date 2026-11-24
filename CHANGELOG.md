@@ -1,5 +1,17 @@
 # Changelog
 
+## 6.2.0: notes on the photo, easier backups, automatic testing
+New
+- **AI scans: notes on the photo.** In review, bars on the photo are coloured like the Recognised view (red = doesn't add up, amber = check), the selected bar and note are marked on the photo, and tapping the photo selects the nearest note. Next issue scrolls both views to the bar.
+- **Send to another device** (Settings → Backup): shares the whole library through the share sheet (AirDrop, Files, Mail on iPhone), or downloads it.
+- **Backup reminder** on the library screen when pieces are saved only on this device ("Not now" snoozes it for a week).
+- **Restore merges** instead of overwriting: new pieces are added, and the most recently changed copy of each piece is kept.
+- The app keeps retrying for a few seconds while the recognition server wakes up, instead of failing straight away.
+Other
+- Every pull request runs all test suites on GitHub (unit, server, practice, stress, offline, AI recognition, backups).
+- A test keeps the version number in step across package.json, the service worker and this changelog.
+- Real homr results for the test photos are kept as fixtures: on the Happy Birthday photo, clean and shadowed, all 52 notes are exactly right.
+
 ## 6.1.1: built-in recognition server
 - AI recognition works out of the box: the app uses the Piano Companion recognition server on Google Cloud Run, with no setup in Settings. Settings → Photo recognition can still point to another server; clearing the box returns to the built-in one.
 - Deploy script grants the build permission new Google Cloud projects lack.
