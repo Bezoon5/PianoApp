@@ -50,6 +50,9 @@ jobs:
       - name: AI recognition end to end
         if: success() || failure()
         run: python -u tests/browser/homr.py
+      - name: Microphone, play along, recording, falling notes
+        if: success() || failure()
+        run: python -u tests/browser/practice63.py
       - name: Backups
         if: (success() || failure()) && hashFiles('tests/browser/backup.py') != ''
         run: python -u tests/browser/backup.py
