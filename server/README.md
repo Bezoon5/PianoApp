@@ -46,7 +46,26 @@ normally stays within Google's monthly free allowance.
    and press **Test connection**.
 
 To update the server after `server/` changes, open Cloud Shell and paste the
-same line again.
+same line again. Updating keeps the key lock below.
+
+### Lock it so only your devices can use it
+
+The app's website is public, so anyone who found the server's address could
+send it photos (on your Google bill). A key stops that. In Cloud Shell, paste:
+
+```bash
+rm -rf PianoApp && git clone --depth 1 https://github.com/Bezoon5/PianoApp.git && bash PianoApp/server/lock-server.sh
+```
+
+It makes a random key, switches the lock on and prints a **set-up link**. Open
+that link once on each of your devices: the app saves the key and removes it
+from the address bar (the part after `#` is never sent to the website). Or type
+the key into **Settings → Photo recognition → Key**. Settings can also copy a
+set-up link for another device.
+
+Devices without the key fall back to the basic on-device recogniser and say why.
+Run the line again to change the key (then re-open the new link on each device).
+To remove the lock: `bash PianoApp/server/lock-server.sh --unlock`.
 
 **Cost.** Cloud Run's monthly free allowance (CPU, memory and requests) covers
 roughly a few thousand pages. Storing the server image costs a few pence a month.
@@ -98,7 +117,7 @@ Set these as environment variables (Cloud Run: **Edit & deploy new revision → 
 | Variable | Default | Meaning |
 |---|---|---|
 | `ALLOWED_ORIGINS` | `https://bezoon5.github.io,http://localhost:8080,http://127.0.0.1:8080` | Websites allowed to use the server. Add your own if you host the app elsewhere. |
-| `API_KEY` | *(none)* | If set, the app must send this key (Settings → Photo recognition → Key). It stops casual use by others, but anyone who can open your app can read it, so it is not strong protection. |
+| `API_KEY` | *(none)* | If set, only devices with this key can recognise pages (see "Lock it" above; `lock-server.sh` sets it). The key is kept on each device, not in the app's code. `/health` stays open and reports `needsKey`. |
 | `HOMR_ARGS` | `--gpu no` | Extra homr options. Use `--gpu auto` on a GPU machine with the `cuda` image. |
 | `HOMR_TIMEOUT` | `300` | Seconds allowed per page. |
 | `MAX_CONCURRENT` | `1` | Pages processed at the same time. Raise only with more CPU and memory. |
