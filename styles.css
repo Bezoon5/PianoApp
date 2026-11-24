@@ -46,3 +46,4 @@ dialog{border:1px solid #365574;border-radius:14px;background:var(--p);color:whi
 .obtns{display:flex;flex-wrap:wrap;gap:10px}.grp{display:inline-flex;gap:4px;flex-wrap:wrap}.grp button{min-width:44px;font-size:15px}.grp button.on{background:var(--b);color:#03111d}.grp .ok{background:#15803d}
 .otitle{display:flex;align-items:center;gap:6px;color:var(--mut)}.otitle input{padding:.55rem;background:#07121f;color:#fff;border:1px solid #3a5372;border-radius:8px;width:240px}
 @media (max-width:980px){.ostep{flex-direction:column;overflow:auto}.oside,.oside.wide{width:auto;flex:none}.opanes{grid-template-columns:1fr;grid-auto-rows:minmax(320px,1fr)}.ocropwrap{min-height:360px}#omr header{grid-template-columns:auto 1fr}#omrReset{display:none}}
+.ehint{display:block;margin-top:3px;color:var(--mut);font-size:12px}.opart input:disabled+span{opacity:.55}

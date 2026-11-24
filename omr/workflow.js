@@ -4,10 +4,12 @@
  *   2. Layout: systems, instruments, part selection, OCR metadata
  *   3. Review: side by side, uncertain measures, correction, validation
  *   4. Save: MusicXML + playable practice piece
+ * Notes are read either on this device (omr/engine.js) or by a homr server
+ * (omr/homr.js, server/), chosen in step 2.
  */
 (function () {
   'use strict';
-  const M = window.OMRModel, G = window.OMRGeometry;
+  const M = window.OMRModel, G = window.OMRGeometry, H = window.OMRHomr;
   const $ = id => document.getElementById(id);
   const DUR_LABEL = { whole: 'Whole', half: 'Half', quarter: 'Quarter', eighth: 'Eighth', '16th': '16th', '32nd': '32nd' };
   const PAGE_TIMEOUT_MS = 90000;
@@ -17,6 +19,19 @@
     score: null, sel: null, addMode: false, addBase: 'quarter', view: 'split',
     history: [], stream: null, reviewPage: 0, meta: { title: '', composer: '', tempo: 90 }, ocrBusy: false, ocrRun: 0, saving: false
   };
+
+  /* ------------------------- AI recognition settings ----------------------- */
+  const store = {
+    get: k => { try { return localStorage.getItem(k) || ''; } catch (e) { return ''; } },
+    set: (k, v) => { try { if (v) localStorage.setItem(k, v); else localStorage.removeItem(k); } catch (e) { /* private mode */ } }
+  };
+  function homrConfig() { return { url: H ? H.normaliseUrl(store.get('pc-homr-url')) : '', key: store.get('pc-homr-key') }; }
+  /** 'homr' when a server is configured (unless the user picked the device), else 'device'. */
+  function engine() {
+    if (!H || !homrConfig().url) return 'device';
+    return store.get('pc-omr-engine') === 'device' ? 'device' : 'homr';
+  }
+  function canRecognise() { return engine() === 'homr' ? state.pages.length > 0 : state.parts.length > 0; }
 
   /* -------------------------------- Worker -------------------------------- */
   let worker = null, reqId = 0;
@@ -86,7 +101,7 @@
     const gray = grayFromCanvas(cv);
     const full = [[0, 0], [cv.width - 1, 0], [cv.width - 1, cv.height - 1], [0, cv.height - 1]];
     const auto = source === 'pdf' ? { corners: full, detected: false } : G.autoCorners(gray, cv.width, cv.height);
-    state.pages.push({ id: 'p' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5), name, source, gray, w: cv.width, h: cv.height, corners: auto.corners, autoDetected: auto.detected, canvas: canvasFromGray(gray, cv.width, cv.height), q: G.quality(gray, cv.width, cv.height) });
+    state.pages.push({ id: 'p' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5), name, source, gray, w: cv.width, h: cv.height, corners: auto.corners, autoDetected: auto.detected, shadow: !!auto.shadow, canvas: canvasFromGray(gray, cv.width, cv.height), q: G.quality(gray, cv.width, cv.height) });
     state.current = state.pages.length - 1;
     renderPages();
   }
@@ -132,7 +147,18 @@
   }
   async function capture() {
     if (!$('omrVideo').videoWidth) return;
-    await addImageSource($('omrVideo'), 'Camera page ' + (state.pages.length + 1), 'camera');
+    const name = 'Camera page ' + (state.pages.length + 1);
+    // A still photo is usually much sharper than a frame of the live preview.
+    const track = state.stream && state.stream.getVideoTracks()[0];
+    if (track && typeof ImageCapture !== 'undefined') {
+      try {
+        const blob = await new ImageCapture(track).takePhoto();
+        await addImageSource(await createImageBitmap(blob), name, 'camera');
+        $('omrCamHint').textContent = 'Captured page ' + state.pages.length + '. Capture another or press Done.';
+        return;
+      } catch (e) { /* fall back to the preview frame */ }
+    }
+    await addImageSource($('omrVideo'), name, 'camera');
     $('omrCamHint').textContent = 'Captured page ' + state.pages.length + '. Capture another or press Done.';
   }
 
@@ -162,6 +188,7 @@
       if (p.q.contrast < 35) tips.push('Low contrast: use brighter, even light.');
       if (p.q.sharpness < 40 && Math.max(p.w, p.h) > 1000) tips.push('Image may be blurred: hold steady or move closer.');
       if (p.autoDetected) tips.push('Page edges detected automatically. Drag the corners to adjust.');
+      if (p.shadow) tips.push('Uneven lighting or a shadow: the whole photo is kept. Drag the corners if you want to crop.');
       $('omrQuality').textContent = tips.join(' ') || 'Page looks good. Drag the corners if the crop needs adjusting.';
     } else $('omrQuality').textContent = '';
   }
@@ -227,7 +254,7 @@
     state.partChosen = false;
     state.partIndex = Math.max(0, state.parts.findIndex(x => x.kind === 'piano'));
     renderLayout();
-    $('omrNext2').disabled = !state.parts.length;
+    $('omrNext2').disabled = !canRecognise();
     runOcr(first);
   }
   function renderLayout() {
@@ -237,7 +264,9 @@
       if (!L || L.error) { info.push('Page ' + (i + 1) + ': analysis failed' + (L && L.error ? ' (' + L.error.split('\n')[0] + ')' : '')); return; }
       info.push('Page ' + (i + 1) + ': ' + L.staves.length + ' staves in ' + L.layout.systems.length + ' systems' + (L.skew ? ', deskewed ' + L.skew.toFixed(2) + '°' : '') + '.');
     });
-    if (!state.parts.length) info.push('No five-line staves were found. Check the crop, rotation and image quality.');
+    if (engine() === 'homr') info.unshift('AI recognition reads the layout itself and picks the piano part unless you choose another below. Quick on-device check:');
+    if (!state.parts.length) info.push(engine() === 'homr' ? 'The quick on-device check found no staves, but AI recognition may still read this page.' : 'No five-line staves were found. Check the crop, rotation and image quality, or set up AI recognition in Settings.');
+    renderEngines();
     $('omrLayoutInfo').textContent = info.join(' ');
     const box = $('omrParts'); box.replaceChildren();
     state.parts.forEach((pt, i) => {
@@ -251,6 +280,15 @@
     $('omrTitle').value = state.meta.title; $('omrComposer').value = state.meta.composer; $('omrTempo').value = state.meta.tempo;
     drawLayout();
   }
+  function renderEngines() {
+    const cfg = homrConfig(), eng = engine();
+    document.querySelectorAll('input[name="omrEngine"]').forEach(r => {
+      r.checked = r.value === eng;
+      if (r.value === 'homr') r.disabled = !cfg.url;
+    });
+    $('omrEngineHint').textContent = cfg.url ? 'Sends each page to ' + cfg.url.replace(/^https?:\/\//, '') + '. About 30 s–2 min per page.' : 'Not set up: add a server address in Settings → Photo recognition.';
+    $('omrNext2').textContent = eng === 'homr' ? 'Recognise with AI →' : 'Recognise notes →';
+  }
   const SLOT_COLORS = ['#f59e0b', '#38bdf8', '#a78bfa', '#4ade80'];
   function drawLayout() {
     const p = state.pages.find(q => q.layout && q.prepCanvas && !q.layout.error), cv = $('omrLayoutCanvas');
@@ -259,6 +297,7 @@
     cv.width = W * d; cv.height = L.height * k * d; cv.style.width = W + 'px'; cv.style.height = L.height * k + 'px';
     const ctx = cv.getContext('2d'); ctx.setTransform(d * k, 0, 0, d * k, 0, 0);
     ctx.drawImage(p.prepCanvas, 0, 0);
+    if (engine() === 'homr') return; // the on-device boxes would only confuse; AI reads the layout itself
     const chosen = state.parts[state.partIndex] || {};
     L.layout.systems.forEach(sys => {
       const ord = {};
@@ -330,10 +369,73 @@
 
   /* ---------------------------- Step 3: review ---------------------------- */
   async function runRecognition() {
-    state.meta.title = $('omrTitle').value.trim() || 'Recognised score';
+    state.meta.title = $('omrTitle').value.trim();
     state.meta.composer = $('omrComposer').value.trim();
     state.meta.tempo = Math.max(30, Math.min(220, +$('omrTempo').value || 90));
     state.ocrRun++;
+    if (engine() === 'homr') return runHomr();
+    return runDeviceRecognition();
+  }
+
+  /** Warp the page to the chosen corners and encode it for the server. */
+  function pageBlob(p) {
+    let g = p.gray, w = p.w, h = p.h;
+    if (!G.isIdentity(p.corners, w, h)) { const r = G.warp(g, w, h, p.corners); g = r.gray; w = r.w; h = r.h; }
+    const cv = canvasFromGray(g, w, h);
+    p.sentCanvas = cv;
+    return new Promise((resolve, reject) => cv.toBlob(b => b ? resolve(b) : reject(new Error('could not prepare the page image')), 'image/jpeg', 0.92));
+  }
+  function cancelHomr() { if (state.homrAbort) { state.homrAbort.abort(); state.homrAbort = null; } }
+
+  async function runHomr() {
+    goStep(3);
+    $('omrNext2').disabled = true;
+    cancelHomr();
+    // The quick on-device layout guess is unreliable on photos: only use a part the user picked.
+    const ctl = state.homrAbort = new AbortController(), cfg = homrConfig(), spec = state.partChosen ? partSpec() : null;
+    const results = [], failures = [];
+    const say = t => { if (!ctl.signal.aborted) $('omrReviewStatus').textContent = t; };
+    let timer = null;
+    const ticking = (label) => { const t0 = Date.now(); clearInterval(timer); say(label); timer = setInterval(() => say(label + ' ' + Math.round((Date.now() - t0) / 1000) + ' s'), 1000); };
+    try {
+      ticking('Connecting to the recognition server (a sleeping free server can take a minute or two to wake up)…');
+      try { await H.health(cfg.url, cfg.key, { signal: ctl.signal }); }
+      catch (e) { if (ctl.signal.aborted) return; clearInterval(timer); return fallBack('AI recognition is unavailable (' + e.message + ').'); }
+      for (let i = 0; i < state.pages.length; i++) {
+        if (ctl.signal.aborted) return;
+        const p = state.pages[i];
+        ticking('Recognising page ' + (i + 1) + ' of ' + state.pages.length + ' with AI…');
+        try {
+          const blob = await pageBlob(p);
+          const r = await H.recognisePage(blob, { url: cfg.url, key: cfg.key, tempo: state.meta.tempoEdited ? state.meta.tempo : null, signal: ctl.signal });
+          results.push({ xml: r.xml, pageIndex: i, seconds: r.seconds });
+        } catch (e) {
+          if (ctl.signal.aborted) return;
+          failures.push({ page: i, message: e.message, network: !e.status });
+          if (!e.status) break; // the server went away; no point trying more pages
+        }
+      }
+    } finally { clearInterval(timer); if (state.homrAbort === ctl) state.homrAbort = null; }
+    if (ctl.signal.aborted) return;
+    $('omrNext2').disabled = false;
+    if (!results.length) return fallBack('AI recognition could not read ' + (state.pages.length > 1 ? 'these pages' : 'this page') + ' (' + (failures[0] ? failures[0].message : 'no result') + ').');
+    state.score = H.toScore(results, { title: state.meta.title, composer: state.meta.composer, tempo: state.meta.tempo, tempoEdited: !!state.meta.tempoEdited, spec });
+    state.pageMap = state.score.pageMap;
+    afterRecognition(failures.map(f => 'Page ' + (f.page + 1) + ' failed: ' + f.message), 'AI recognition: ');
+  }
+  /** Server unreachable or nothing recognised: say so, then use the on-device recogniser if it can. */
+  function fallBack(reason) {
+    if (state.parts.length) {
+      runDeviceRecognition(reason + ' Using the basic on-device recogniser instead.');
+    } else {
+      goStep(2);
+      $('omrNext2').disabled = !canRecognise();
+      $('omrLayoutInfo').textContent = reason + ' The on-device recogniser could not find staves either. Check the server in Settings, or retake the photo.';
+    }
+  }
+
+  async function runDeviceRecognition(prefix) {
+    if (!state.meta.title) state.meta.title = 'Recognised score';
     goStep(3);
     $('omrNext2').disabled = true;
     const spec = partSpec(), results = [];
@@ -349,16 +451,21 @@
     $('omrNext2').disabled = false;
     const ok = results.filter(r => r.recognition);
     state.score = M.buildScore(ok, { title: state.meta.title, composer: state.meta.composer, tempo: state.meta.tempo });
+    state.score.engine = 'device';
     if (spec && state.score.part) state.score.part.name = spec.name;
     state.pageMap = ok.map(r => r.pageIndex);
+    afterRecognition(results.filter(r => r.error).map(r => 'Page ' + (r.pageIndex + 1) + ' failed: ' + r.error.split('\n')[0]), prefix ? prefix + ' ' : '');
+  }
+  function afterRecognition(pageErrors, prefix) {
     state.history = []; state.sel = null; state.reviewPage = 0;
+    $('omrUndo').disabled = true;
     fillReviewControls();
     validateAndRender();
     const s = M.summary(state.score), notes = [];
-    if (s.measures) notes.push(s.measures + ' measures recognised. Start with the red and amber measures.');
-    else notes.push('No measures were recognised. Go back and check the crop or choose another part.');
-    results.filter(r => r.error).forEach(r => notes.push('Page ' + (r.pageIndex + 1) + ' failed: ' + r.error.split('\n')[0]));
-    state.score.warnings.forEach(w => notes.push('Page ' + (state.pageMap[w.page] + 1) + ' · ' + w.message));
+    if (s.measures) notes.push(prefix + s.measures + ' measures recognised.' + (s.invalid + s.uncertain ? ' Start with the red and amber measures.' : ' Every measure adds up; play it through to check.'));
+    else notes.push(prefix + 'No measures were recognised. Go back and check the crop or choose another part.');
+    pageErrors.forEach(t => notes.push(t));
+    state.score.warnings.forEach(w => notes.push('Page ' + ((w.photoPage != null ? w.photoPage : state.pageMap[w.page]) + 1) + ' · ' + w.message));
     $('omrReviewStatus').textContent = notes.join(' ');
     if (s.invalid + s.uncertain) nextIssue(null, true);
   }
@@ -432,6 +539,15 @@
   }
   function drawOriginal() {
     const cv = $('omrOrig'); if (cv.parentElement.offsetParent === null) return;
+    if (state.score.engine === 'homr') {
+      // homr gives notes, not positions on the photo: show the photo as sent.
+      const page = state.pages[state.pageMap[state.reviewPage]], img = page && (page.sentCanvas || page.canvas);
+      const W = Math.max(200, cv.parentElement.clientWidth - 6), Ht = img ? img.height * W / img.width : 300, d = window.devicePixelRatio || 1;
+      cv.width = Math.round(W * d); cv.height = Math.round(Ht * d); cv.style.width = W + 'px'; cv.style.height = Ht + 'px';
+      const c2 = cv.getContext('2d'); c2.setTransform(d, 0, 0, d, 0, 0);
+      if (img) c2.drawImage(img, 0, 0, W, Ht);
+      return;
+    }
     const { ctx, k } = setupCanvas(cv);
     const page = state.pages[state.pageMap[state.reviewPage]];
     if (page && page.prepCanvas) ctx.drawImage(page.prepCanvas, 0, 0);
@@ -576,6 +692,7 @@
   }
   function onPaneClick(ev) {
     if (!state.score) return;
+    if (state.score.engine === 'homr' && ev.currentTarget.id === 'omrOrig') { $('omrSelInfo').textContent = 'Tap notes in the Recognised view to edit them.'; return; }
     const [x, y] = pagePoint(ev.currentTarget, ev);
     if (state.addMode) {
       const p = placeAt(x, y);
@@ -603,7 +720,7 @@
   function renderEditor() {
     const f = selected();
     $('omrEditor').classList.toggle('empty', !f);
-    if (!f) { $('omrSelInfo').textContent = state.addMode ? 'Add mode: tap the recognised score where the note belongs.' : 'Tap a note or rest on either view to edit it. Red/amber measures need attention.'; return; }
+    if (!f) { $('omrSelInfo').textContent = state.addMode ? 'Add mode: tap the recognised score where the note belongs.' : (state.score && state.score.engine === 'homr' ? 'Tap a note or rest in the Recognised view to edit it.' : 'Tap a note or rest on either view to edit it.') + ' Red/amber measures need attention.'; return; }
     const e = f.event, pitch = e.type === 'rest' ? 'Rest' : e.notes.map(n => (n === f.note ? '▸' : '') + (n.name || M.diatonicName(n.diatonic))).join(' + ');
     const d = f.measure.details.filter(x => x.staff === f.staffIndex);
     $('omrSelInfo').textContent = 'Measure ' + measureNumber(f.measure) + (f.measure.accepted ? ' (accepted)' : '') + ' · ' + (f.staff.clef === 'bass' ? 'bass (left hand)' : 'treble (right hand)') + ' · ' + pitch + ' · ' + DUR_LABEL[e.base] + (e.dots ? ' dotted' : '') + ' · voice ' + (e.voice || 1) + ' · confidence ' + Math.round((e.verified ? 1 : e.conf) * 100) + '% · beats ' + d.map(x => fmt(x.total) + '/' + fmt(x.expected) + (x.ok ? ' ✓' : ' ✖')).join(', ');
@@ -761,6 +878,7 @@
   }
   function reset() {
     stopCamera();
+    cancelHomr();
     state.ocrRun++;
     Object.assign(state, { pages: [], current: 0, parts: [], partIndex: 0, partChosen: false, score: null, sel: null, history: [], meta: { title: '', composer: '', tempo: 90 } });
     renderPages(); goStep(1);
@@ -774,7 +892,14 @@
     $('omrAddPdf').onclick = () => $('omrPdfIn').click();
     $('omrCapture').onclick = capture;
     $('omrCamDone').onclick = stopCamera;
-    $('omrAuto').onclick = () => { const p = state.pages[state.current]; if (!p) return; const a = G.autoCorners(p.gray, p.w, p.h); p.corners = a.corners; p.autoDetected = a.detected; p.layout = null; renderPages(); };
+    $('omrNativeCam').onclick = () => $('omrCameraIn').click();
+    $('omrCameraIn').onchange = e => { const files = [...e.target.files]; e.target.value = ''; if (files.length) { stopCamera(); loadFiles(files); } };
+    document.querySelectorAll('input[name="omrEngine"]').forEach(r => r.onchange = () => {
+      store.set('pc-omr-engine', r.value); renderEngines(); renderLayout();
+      $('omrNext2').disabled = !canRecognise();
+    });
+    bindSettings();
+    $('omrAuto').onclick = () => { const p = state.pages[state.current]; if (!p) return; const a = G.autoCorners(p.gray, p.w, p.h); p.corners = a.corners; p.autoDetected = a.detected; p.shadow = !!a.shadow; p.layout = null; renderPages(); };
     $('omrFull').onclick = () => { const p = state.pages[state.current]; if (!p) return; p.corners = [[0, 0], [p.w - 1, 0], [p.w - 1, p.h - 1], [0, p.h - 1]]; p.layout = null; drawCrop(); };
     $('omrRotL').onclick = () => rotatePage(false);
     $('omrRotR').onclick = () => rotatePage(true);
@@ -788,12 +913,12 @@
     $('omrNext1').onclick = runLayout;
     $('omrBack2').onclick = () => goStep(1);
     $('omrNext2').onclick = runRecognition;
-    $('omrBack3').onclick = () => goStep(2);
+    $('omrBack3').onclick = () => { cancelHomr(); goStep(2); $('omrNext2').disabled = !canRecognise(); renderEngines(); };
     $('omrTitle').oninput = e => { state.meta.title = e.target.value; state.meta.titleEdited = true; };
     $('omrComposer').oninput = e => { state.meta.composer = e.target.value; state.meta.composerEdited = true; };
     $('omrTempo').oninput = e => { state.meta.tempo = +e.target.value; state.meta.tempoEdited = true; };
     $('omrRerunOcr').onclick = () => runOcr(state.pages.find(p => p.layout && p.layout.staves && p.layout.staves.length));
-    $('omrClose').onclick = () => { stopCamera(); window.PCApp.nav('library'); };
+    $('omrClose').onclick = () => { stopCamera(); cancelHomr(); window.PCApp.nav('library'); };
     $('omrReset').onclick = reset;
     document.querySelectorAll('.osteps li').forEach(li => li.onclick = () => {
       const n = +li.dataset.step;
@@ -803,6 +928,29 @@
     window.addEventListener('resize', () => { if (state.step === 1) drawCrop(); if (state.step === 2) drawLayout(); if (state.step === 3 && state.score) renderPanes(); });
   }
 
-  window.PCOMR = { open, reset, state, _analyse: analyse };
+  /* Settings → Photo recognition */
+  function bindSettings() {
+    const url = $('homrUrl'), key = $('homrKey'), st = $('homrStatus');
+    if (!url) return;
+    if (!H) { st.textContent = 'omr/homr.js did not load: upload the whole omr/ folder.'; return; }
+    url.value = store.get('pc-homr-url'); key.value = store.get('pc-homr-key');
+    const describe = () => { st.textContent = homrConfig().url ? 'Photos will be read by ' + homrConfig().url + '. Press Test connection to check it.' : 'Not set: photos use the basic on-device recogniser.'; };
+    describe();
+    url.onchange = () => { const n = H.normaliseUrl(url.value); store.set('pc-homr-url', n); url.value = n; if (n) store.set('pc-omr-engine', 'homr'); describe(); if (state.step === 2) { renderEngines(); $('omrNext2').disabled = !canRecognise(); } };
+    key.onchange = () => { store.set('pc-homr-key', key.value.trim()); };
+    $('homrTest').onclick = async () => {
+      url.onchange(); key.onchange();
+      const cfg = homrConfig();
+      if (!cfg.url) { st.textContent = 'Enter the server address first.'; return; }
+      $('homrTest').disabled = true; st.textContent = 'Contacting ' + cfg.url + '… (a sleeping server can take a minute or two)';
+      try {
+        const h = await H.health(cfg.url, cfg.key);
+        st.textContent = '✓ Connected: homr ' + h.version + (h.busy ? ' · busy with ' + h.busy + ' page(s)' : ' · ready') + (h.needsKey && !cfg.key ? ' · this server needs a key' : '') + '.';
+      } catch (e) { st.textContent = '✖ ' + e.message.charAt(0).toUpperCase() + e.message.slice(1) + '.'; }
+      finally { $('homrTest').disabled = false; }
+    };
+  }
+
+  window.PCOMR = { open, reset, state, _analyse: analyse, _engine: engine };
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
 })();

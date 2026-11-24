@@ -1,4 +1,4 @@
-# Piano Companion 6
+# Piano Companion 6.1
 
 **Live app:** https://bezoon5.github.io/PianoApp
 
@@ -11,8 +11,13 @@ A piano practice app for iPad and desktop browsers. Import music, follow the eng
 |---|---|---|
 | **MusicXML** (`.musicxml`, `.xml`, `.mxl`) | Exact | Recommended. Export from MuseScore, Sibelius, Finale or Dorico. Multi-part scores ask which part to practise (piano suggested). |
 | **MIDI** | Exact notes | Notation is generated, so the display is approximate. |
-| **Camera / Photos / PDF** | Needs review | Optical music recognition with a review-and-correct step. |
+| **Camera / Photos / PDF** | Good with AI recognition; needs review | Optical music recognition with a review-and-correct step. With a [recognition server](server/README.md) connected, pages are read by the homr neural network, which copes with real phone photos. Without one, a basic on-device recogniser is used (best with clean screenshots). |
 | **Built-in** | – | 25 public-domain Christmas melodies and Happy Birthday. |
+
+### AI recognition for photos (recommended)
+Phone photos have shadows, tilt and page curl that the built-in recogniser can't handle reliably. For dependable results, run the small recognition server in [`server/`](server/README.md), which uses [homr](https://github.com/liebharc/homr). The free Hugging Face Spaces tier is enough; setup takes about 15 minutes. Then in the app: **Settings → Photo recognition**, paste the server address and press **Test connection**. When scanning, choose **AI recognition** in the Layout step (it becomes the default once a server is set). If the server is unreachable, the app says so and falls back to the on-device recogniser.
+
+Tips for good photos: lay the page flat, fill the frame, use even light, and use **Camera app (sharper)** for a full-resolution photo.
 
 ## Practising
 - **Listen** or **Wait mode**. In Wait mode the app waits for the right note or chord and scores you.
@@ -34,7 +39,8 @@ A piano practice app for iPad and desktop browsers. Import music, follow the eng
 
 ## Known limitations
 - MusicXML: D.C./D.S./Coda jumps are not followed; cue and grace notes are not played.
-- Scanning: ties, slurs, tuplets and accidentals next to notes are not recognised; review is required.
+- Scanning with AI recognition: dynamics, articulations, grace notes and repeat signs are not used; key and time-signature changes inside a piece should be checked. Review is still recommended.
+- Scanning on this device only: ties, slurs, tuplets and accidentals next to notes are not recognised; review is required.
 - Practice history is stored in the browser; use Backup to keep a copy.
 - The sheet-music engine (~7 MB) downloads the first time it is used.
 
@@ -46,13 +52,17 @@ music/practice.js                   hands, loops, speed trainer, metronome, prog
 music/xml.js, music/musicxml.js     MusicXML import/export
 music/notation.js                   Verovio rendering, bar/note highlighting, loop marking
 omr/                                optical music recognition and review workflow
+omr/homr.js                         AI recognition: server client + MusicXML -> review score
+server/                             recognition server (homr), Dockerfile, deploy guide
 tests/                              Node tests, fixtures, browser suites, Verovio check
 ```
 
 ## Run and test
 ```
 npm start                                   # http://localhost:8080
-npm test                                    # 51 Node tests
+npm test                                    # 63 Node tests
+python3 tests/server/test_server.py         # recognition server API (stub homr; needs starlette, uvicorn, python-multipart, requests)
+python3 tests/browser/homr.py               # AI recognition end to end (Playwright), 25 checks
 pip install verovio && python3 tests/verovio_check.py
 python3 tests/browser/server.py 8080 &      # browser suites (Playwright)
 python3 tests/browser/practice6.py http://127.0.0.1:8080/index.html   # 29 checks
@@ -61,7 +71,7 @@ python3 tests/browser/offline.py   http://127.0.0.1:8080/index.html   # 7 checks
 ```
 
 ## Publishing
-Upload the contents of this folder to the repository root, **including the `music/`, `omr/`, `icons/`, `docs/` and `tests/` folders** (drag the folders in; the file picker skips folders). Then **Settings → Pages → Source: GitHub Actions**.
+Upload the contents of this folder to the repository root, **including the `music/`, `omr/`, `server/`, `icons/`, `docs/` and `tests/` folders** (drag the folders in; the file picker skips folders). Then **Settings → Pages → Source: GitHub Actions**.
 
 ## Credits
-[Tone.js](https://tonejs.github.io), [@tonejs/midi](https://github.com/Tonejs/Midi), [Salamander Grand Piano](https://archive.org/details/SalamanderGrandPianoV3) samples (CC-BY 3.0, Alexander Holm), [Verovio](https://www.verovio.org) (LGPL-3.0), [PDF.js](https://mozilla.github.io/pdf.js/), [Tesseract.js](https://tesseract.projectnaptha.com), all loaded from public CDNs. Test scores from the [music21](https://github.com/cuthbertLab/music21) corpus. Visual in this file was generated with Microsoft Copilot.
+[Tone.js](https://tonejs.github.io), [@tonejs/midi](https://github.com/Tonejs/Midi), [Salamander Grand Piano](https://archive.org/details/SalamanderGrandPianoV3) samples (CC-BY 3.0, Alexander Holm), [Verovio](https://www.verovio.org) (LGPL-3.0), [PDF.js](https://mozilla.github.io/pdf.js/), [Tesseract.js](https://tesseract.projectnaptha.com), all loaded from public CDNs. Photo recognition server: [homr](https://github.com/liebharc/homr) (AGPL-3.0, runs separately; see server/README.md). Test scores from the [music21](https://github.com/cuthbertLab/music21) corpus. Visual in this file was generated with Microsoft Copilot.

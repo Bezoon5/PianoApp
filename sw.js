@@ -1,13 +1,13 @@
 /* Piano Companion service worker (v6): installable, works offline.
  * App files: network first (updates arrive immediately), cache when offline.
  * Libraries, sheet-music engine and piano samples: cache first. */
-const VERSION = '6.0.0';
+const VERSION = '6.1.0';
 const SHELL = 'pc-shell-' + VERSION;
 const RUNTIME = 'pc-runtime-v1';
 const SHELL_FILES = [
   './', 'index.html', 'app.js', 'styles.css', 'hero.jpg', 'manifest.webmanifest',
   'icons/icon-192.png', 'icons/icon-512.png', 'icons/maskable-512.png', 'icons/apple-touch-icon.png',
-  'omr/engine.js', 'omr/geometry.js', 'omr/model.js', 'omr/worker.js', 'omr/workflow.js',
+  'omr/engine.js', 'omr/geometry.js', 'omr/model.js', 'omr/homr.js', 'omr/worker.js', 'omr/workflow.js',
   'music/xml.js', 'music/musicxml.js', 'music/notation.js', 'music/practice.js'
 ];
 const CDN_HOSTS = /(^|\.)(cdnjs\.cloudflare\.com|cdn\.jsdelivr\.net|unpkg\.com|tonejs\.github\.io|verovio\.org|tessdata\.projectnaptha\.com)$/;

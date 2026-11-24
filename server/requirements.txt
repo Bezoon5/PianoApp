@@ -1,0 +1,4 @@
+homr[cpu]==0.7.1
+starlette>=0.37,<2
+uvicorn>=0.30
+python-multipart>=0.0.9
