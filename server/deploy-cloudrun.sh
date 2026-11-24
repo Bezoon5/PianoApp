@@ -31,6 +31,18 @@ fi
 echo "==> Turning on Cloud Run, Cloud Build and Artifact Registry (first time only)"
 gcloud services enable run.googleapis.com cloudbuild.googleapis.com artifactregistry.googleapis.com
 
+# New projects don't give the default build account the rights it needs for source
+# deploys (Google: grant Cloud Run Builder to the Compute Engine default service account).
+NUMBER="$(gcloud projects describe "$PROJECT" --format='value(projectNumber)')"
+BUILDER="serviceAccount:${NUMBER}-compute@developer.gserviceaccount.com"
+if ! gcloud projects get-iam-policy "$PROJECT" --flatten='bindings[].members' \
+     --filter="bindings.role=roles/run.builder AND bindings.members=$BUILDER" --format='value(bindings.role)' | grep -q run.builder; then
+  echo "==> Giving the build account permission to build (first time only)"
+  gcloud projects add-iam-policy-binding "$PROJECT" --member="$BUILDER" --role=roles/run.builder --condition=None --quiet >/dev/null
+  echo "    Waiting 90 seconds for the permission to take effect..."
+  sleep 90
+fi
+
 echo "==> Building and deploying (about 5-10 minutes the first time)"
 # 2 vCPU / 4 GiB per page; at most 2 copies run at once, which caps cost;
 # scales to zero when unused.
