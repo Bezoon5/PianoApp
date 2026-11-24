@@ -546,6 +546,11 @@
   const confColor = c => c >= 0.85 ? '#16a34a' : c >= 0.6 ? '#d97706' : '#dc2626';
 
   function renderPanes() {
+    // Phones are too narrow for side by side: show one view at a time (Recognised first, where edits happen).
+    if (state.view === 'split' && window.matchMedia && window.matchMedia('(max-width: 700px)').matches) {
+      state.view = 'rec';
+      document.querySelectorAll('[data-view]').forEach(x => x.classList.toggle('on', x.dataset.view === 'rec'));
+    }
     if (!state.score || !state.score.pages.length) return;
     $('omrPanes').dataset.view = state.view;
     drawOriginal(); drawRecognised();

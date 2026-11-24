@@ -1,7 +1,7 @@
 /* Piano Companion service worker (v6): installable, works offline.
  * App files: network first (updates arrive immediately), cache when offline.
  * Libraries, sheet-music engine and piano samples: cache first. */
-const VERSION = '6.3.1';
+const VERSION = '6.4.0';
 const SHELL = 'pc-shell-' + VERSION;
 const RUNTIME = 'pc-runtime-v1';
 const SHELL_FILES = [

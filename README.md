@@ -27,6 +27,8 @@ Tips for good photos: lay the page flat, fill the frame, use even light, and use
 
 **Connecting your piano.** On a computer, Chrome or Edge connect a MIDI keyboard (USB or Bluetooth). Safari on iPhone and iPad cannot use MIDI keyboards, so use **🎤 Mic** on the practice screen instead: the app listens to your piano. Microphone tips: put the phone near the piano, keep the room quiet for the one-second calibration, and use headphones if the app plays the other hand for you. Single notes are recognised reliably; simple chords mostly; fast or very complex passages less so.
 
+The top row has the mode switch (**Listen | Wait | Play along**), Play, Stop, 🎤 and Falling notes. Everything else is under **⚙︎ Tools** (folded away on phones; tap it to open). Messages appear on one status line underneath.
+
 - **Listen** plays the piece.
 - **Wait mode** waits for the right note or chord before moving on, and scores you.
 - **Play along** runs at tempo after a count-in and marks each note **on time, early, late, missed or wrong**, with a live score. **Timing** sets how strict it is (Strict, Normal, Relaxed). The summary says whether you tend to rush or drag. A MIDI keyboard gives the most precise timing; the microphone is rougher. Bluetooth headphones add a delay that makes notes look late, so use wired ones or the speaker.
@@ -76,9 +78,10 @@ tests/                              Node tests, fixtures, browser suites, Verovi
 ## Run and test
 ```
 npm start                                   # http://localhost:8080
-npm test                                    # 79 Node tests (all suites also run on GitHub for every pull request)
+npm test                                    # 80 Node tests (all suites also run on GitHub for every pull request)
+python3 tests/browser/layout.py             # phone and desktop layout (Playwright)
 python3 tests/server/test_server.py         # recognition server API (stub homr; needs starlette, uvicorn, python-multipart, requests)
-python3 tests/browser/homr.py               # AI recognition end to end (Playwright), 36 checks
+python3 tests/browser/homr.py               # AI recognition end to end (Playwright), 47 checks
 python3 tests/browser/backup.py             # backups: reminder, send, merging restore, 14 checks
 python3 tests/browser/practice63.py         # microphone, play along, recording, falling notes, 28 checks
 pip install verovio && python3 tests/verovio_check.py
