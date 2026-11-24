@@ -99,6 +99,17 @@
       if (x + y > vbr) { vbr = x + y; br = [x, y]; }
       if (x - y < vbl) { vbl = x - y; bl = [x, y]; }
     }
+    // A table or background is smooth; shadowed paper still has staff lines and text.
+    // If the area outside the detected page is about as busy as the page, the "edge"
+    // is a shadow, so keep the whole image rather than cutting music off.
+    let inE = 0, inN = 0, outE = 0, outN = 0;
+    const edge = 12;
+    for (let y = 1; y < sh - 1; y++) for (let x = 1; x < sw - 1; x++) {
+      const k = y * sw + x, g = Math.abs(small[k + 1] - small[k - 1]) + Math.abs(small[k + sw] - small[k - sw]);
+      const e = g > edge * 2 ? 1 : 0;
+      if (lab[k] === bestId) { inE += e; inN++; } else { outE += e; outN++; }
+    }
+    if (outN > sw * sh * 0.03 && outE / outN > 0.5 * (inE / Math.max(1, inN))) return { corners: full, detected: false, shadow: true };
     const up = p => [Math.min(w - 1, p[0] / s), Math.min(h - 1, p[1] / s)];
     return { corners: [up(tl), up(tr), up(br), up(bl)], detected: true };
   }

@@ -96,7 +96,7 @@
     <div id="omrCamera" class="ocamera" hidden>
       <div class="ocamstage"><video id="omrVideo" autoplay playsinline muted></video><div class="oguide"></div></div>
       <p id="omrCamHint"></p>
-      <div class="ofoot"><button id="omrCamDone">Done</button><button id="omrCapture" class="primary camera-big">📷 Capture page</button></div>
+      <div class="ofoot"><button id="omrCamDone">Done</button><button id="omrNativeCam" title="Opens your device's camera app for a full-resolution photo">Camera app (sharper)</button><button id="omrCapture" class="primary camera-big">📷 Capture page</button></div>
     </div>
   </div>
 
@@ -105,6 +105,11 @@
     <aside class="oside wide">
       <h3>Detected layout</h3>
       <p id="omrLayoutInfo" class="muted"></p>
+      <h3>Recognition</h3>
+      <div id="omrEngines">
+        <label class="opart"><input type="radio" name="omrEngine" value="homr"><span>AI recognition (homr server) · best for photos<small id="omrEngineHint" class="ehint"></small></span></label>
+        <label class="opart"><input type="radio" name="omrEngine" value="device"><span>On this device · basic, works offline<small class="ehint">Best with clean screenshots or PDFs.</small></span></label>
+      </div>
       <h3>Part to practise</h3>
       <div id="omrParts"></div>
       <h3>Score details</h3>
@@ -156,6 +161,12 @@
   <label>Keyboard range<select id="range"><option>61</option><option>76</option><option selected>88</option></select></label>
   <label>Sound<select id="soundSel"><option value="piano">Grand piano (recorded samples)</option><option value="synth">Simple synth</option></select></label>
   <p id="soundStatus" class="muted">The grand piano loads the first time you play.</p>
+  <h3>Photo recognition</h3>
+  <p class="muted">For reliable results from photos, connect a homr recognition server. Setup steps are in <code>server/README.md</code> in the project.</p>
+  <label>Server address<input id="homrUrl" placeholder="https://your-name-piano-recogniser.hf.space" inputmode="url" autocomplete="off" autocapitalize="off" spellcheck="false"></label>
+  <label>Key (only if your server uses one)<input id="homrKey" autocomplete="off" autocapitalize="off" spellcheck="false"></label>
+  <div class="actions left"><button id="homrTest">Test connection</button></div>
+  <p id="homrStatus" class="muted">Not set: photos use the basic on-device recogniser.</p>
   <h3>MIDI keyboard</h3>
   <p id="midiStatus" class="muted">Checking for MIDI keyboards…</p>
   <h3>Backup</h3>
@@ -176,6 +187,7 @@
 <input id="restoreIn" type="file" accept=".json,application/json" hidden>
 <input id="omrPhotoIn" type="file" accept="image/*" multiple hidden>
 <input id="omrPdfIn" type="file" accept="application/pdf,.pdf" hidden>
+<input id="omrCameraIn" type="file" accept="image/*" capture="environment" hidden>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js" crossorigin="anonymous"></script>
 <script src="https://cdn.jsdelivr.net/npm/@tonejs/midi@2.0.28/build/Midi.js" crossorigin="anonymous"></script>
@@ -185,6 +197,7 @@
 <script src="omr/model.js"></script>
 <script src="music/xml.js"></script>
 <script src="music/musicxml.js"></script>
+<script src="omr/homr.js"></script>
 <script src="music/notation.js"></script>
 <script src="music/practice.js"></script>
 <script src="app.js"></script>

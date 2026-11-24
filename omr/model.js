@@ -28,7 +28,10 @@
     if (key < 0) return FLAT_ORDER.slice(0, -key).indexOf(letterIdx) >= 0 ? -1 : 0;
     return 0;
   }
-  function duration(e) { const b = DUR[e.base] || 1; return e.dots === 2 ? b * 1.75 : e.dots === 1 ? b * 1.5 : b; }
+  function duration(e) {
+    const b = DUR[e.base] || 1, d = e.dots === 2 ? b * 1.75 : e.dots === 1 ? b * 1.5 : b;
+    return e.tuplet ? d * e.tuplet.normal / e.tuplet.actual : d;
+  }
   function measureLength(time) { return time[0] * 4 / time[1]; }
 
   /** A lone non-zero vote cannot override a clear majority. */
@@ -59,7 +62,7 @@
             clef: st.clef, staff: st.staff,
             events: st.events.map(e => ({
               id: id('e'), type: e.type, base: e.base, dots: e.dots || 0, voice: e.voice || 1, x: e.x,
-              stemDir: e.stemDir || null, conf: e.conf, verified: false, y: e.y, restBox: e.restBox,
+              stemDir: e.stemDir || null, conf: e.conf, verified: false, y: e.y, restBox: e.restBox, tuplet: e.tuplet || null,
               notes: (e.notes || []).map(n => ({ id: id('n'), diatonic: clefBase(st.clef) + n.step, accidental: null, x: n.x, y: n.y, conf: n.conf }))
             }))
           }))
@@ -140,7 +143,7 @@
 
   function toSong(score, opts) {
     opts = opts || {};
-    const len = measureLength(score.time), notes = [], measureStarts = [];
+    const len = measureLength(score.time), notes = [], measureStarts = [], ties = {};
     let start = 0;
     score.measures.forEach((m, mi) => {
       resolveMeasure(score, m);
@@ -152,19 +155,32 @@
           const v = e.voice || 1, t = onset[v] || 0, d = duration(e);
           if (e.type === 'note') e.notes.forEach(n => {
             if (n.midi < 21 || n.midi > 108) return;
-            notes.push({ midi: n.midi, startBeat: start + t, durationBeats: d * 0.95, velocity: 0.72, hand: st.clef === 'bass' || k === 1 ? 'left' : 'right', staff: k + 1, measure: mi + 1 });
+            // Ties continue a note of the same pitch, same voice first (unisons between voices are common).
+            const at = start + t, vkey = k + ':' + v + ':' + n.midi, skey = k + ':' + n.midi;
+            const fits = o => o && Math.abs(o.end - at) < 0.02;
+            const open = n.tieStop ? (fits(ties[vkey]) ? ties[vkey] : fits(ties[skey]) ? ties[skey] : null) : null;
+            const release = o => { Object.keys(ties).forEach(q => { if (ties[q] === o) delete ties[q]; }); };
+            if (open) {
+              open.dur += d; open.end = at + d;
+              if (!n.tieStart) release(open);
+              return;
+            }
+            const note = { midi: n.midi, startBeat: at, dur: d, end: at + d, velocity: 0.72, hand: st.clef === 'bass' || k === 1 ? 'left' : 'right', staff: k + 1, measure: mi + 1 };
+            notes.push(note);
+            if (n.tieStart) { ties[vkey] = note; ties[skey] = note; }
           });
           onset[v] = t + d;
         });
       });
       start += mLen;
     });
+    notes.forEach(n => { n.durationBeats = n.dur * 0.95; delete n.dur; delete n.end; });
     notes.sort((a, b) => a.startBeat - b.startBeat || a.midi - b.midi);
     return {
       id: opts.id || 'omr-' + Date.now().toString(36), title: score.title, composer: score.composer || 'Recognised score · reviewed',
       bpm: score.tempo || 90, source: 'OMR', category: 'imported', timeSignature: score.time.slice(), key: score.key, notes,
       totalBeats: start, measureStarts, musicxml: toMusicXML(score),
-      omr: { measures: score.measures.length, summary: summary(score), reviewedAt: new Date().toISOString() }
+      omr: { engine: score.engine || 'device', measures: score.measures.length, summary: summary(score), reviewedAt: new Date().toISOString() }
     };
   }
 
@@ -173,7 +189,7 @@
 
   /** MusicXML 3.1 partwise; <note> children follow the schema order. */
   function toMusicXML(score) {
-    const DIV = 8, staves = score.measures.length ? score.measures[0].staves.length : 1;
+    const DIV = 48, staves = score.measures.length ? score.measures[0].staves.length : 1;
     const name = score.part && score.part.name ? score.part.name : 'Piano';
     const firstPickup = score.measures[0] && score.measures[0].pickup;
     const out = [
@@ -205,12 +221,17 @@
           byVoice[v].sort((a, b) => a.x - b.x).forEach(e => {
             const dur = Math.max(1, Math.round(duration(e) * DIV));
             written += dur;
-            const after = (acc) => '<duration>' + dur + '</duration><voice>' + voiceNo + '</voice><type>' + e.base + '</type>' + '<dot/>'.repeat(e.dots || 0) + (acc || '') + (staves > 1 ? '<staff>' + (k + 1) + '</staff>' : '');
+            const tm = e.tuplet ? '<time-modification><actual-notes>' + e.tuplet.actual + '</actual-notes><normal-notes>' + e.tuplet.normal + '</normal-notes></time-modification>' : '';
+            const after = (acc, n) => {
+              const tie = n ? (n.tieStop ? '<tie type="stop"/>' : '') + (n.tieStart ? '<tie type="start"/>' : '') : '';
+              const tied = n && (n.tieStop || n.tieStart) ? '<notations>' + (n.tieStop ? '<tied type="stop"/>' : '') + (n.tieStart ? '<tied type="start"/>' : '') + '</notations>' : '';
+              return '<duration>' + dur + '</duration>' + tie + '<voice>' + voiceNo + '</voice><type>' + e.base + '</type>' + '<dot/>'.repeat(e.dots || 0) + (acc || '') + tm + (staves > 1 ? '<staff>' + (k + 1) + '</staff>' : '') + tied;
+            };
             if (e.type === 'rest' || !e.notes.length) { out.push('      <note><rest/>' + after('') + '</note>'); return; }
             e.notes.slice().sort((a, b) => a.diatonic - b.diatonic).forEach((n, ni) => {
               const letter = ((n.diatonic % 7) + 7) % 7, octave = Math.floor(n.diatonic / 7), alter = n.alter || 0;
               const acc = n.accidental != null ? '<accidental>' + ACC_XML[n.accidental] + '</accidental>' : '';
-              out.push('      <note>' + (ni ? '<chord/>' : '') + '<pitch><step>' + LETTERS[letter] + '</step>' + (alter ? '<alter>' + alter + '</alter>' : '') + '<octave>' + octave + '</octave></pitch>' + after(acc) + '</note>');
+              out.push('      <note>' + (ni ? '<chord/>' : '') + '<pitch><step>' + LETTERS[letter] + '</step>' + (alter ? '<alter>' + alter + '</alter>' : '') + '<octave>' + octave + '</octave></pitch>' + after(acc, n) + '</note>');
             });
           });
         });

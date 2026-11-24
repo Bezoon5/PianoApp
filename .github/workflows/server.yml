@@ -1,0 +1,27 @@
+name: Recognition server
+on:
+  push: {paths: ['server/**', 'tests/server/**', '.github/workflows/server.yml']}
+  pull_request: {paths: ['server/**', 'tests/server/**', '.github/workflows/server.yml']}
+  workflow_dispatch: {}
+jobs:
+  stub:
+    name: API tests (stub homr)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - run: pip install starlette uvicorn python-multipart requests
+      - run: python tests/server/test_server.py
+  real:
+    name: Docker image with real homr
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t piano-recogniser server
+      - run: docker run -d --name rec -p 7860:7860 -e ALLOWED_ORIGINS=http://localhost piano-recogniser
+      - run: pip install requests
+      - run: python tests/server/smoke_real.py http://localhost:7860 tests/browser/happy.png tests/browser/shadow.png tests/browser/together.png
+      - if: always()
+        run: docker logs rec | tail -50

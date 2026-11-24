@@ -1,5 +1,17 @@
 # Changelog
 
+## 6.1.0: AI recognition for photos
+New
+- **AI recognition (homr)**: photos and PDF pages can be read by [homr](https://github.com/liebharc/homr), a neural-network music recogniser built for camera pictures, running on a small server you deploy once (`server/`, free on Hugging Face Spaces). Results go through the same review screen: measures that don't add up are flagged, every note can be edited, and the piece saves for practice as before.
+- **Settings → Photo recognition**: server address, optional key and **Test connection**.
+- **Layout step**: choose AI recognition or on-device recognition. AI becomes the default once a server is set; if the server can't be reached the app explains why and falls back to the on-device recogniser.
+- Review supports **ties and triplets** (playback and MusicXML export), as returned by AI recognition.
+- **Sharper camera photos**: Capture takes a full-resolution still where the browser allows it, and **Camera app (sharper)** opens the device's own camera.
+Fixes
+- Auto-crop no longer cuts off parts of the page that are in shadow (it used to crop away the clefs on unevenly lit photos).
+Other
+- 63 Node tests (12 new, including a note-for-note comparison of the AI path against the MusicXML importer on five real scores), recognition-server API tests, a 25-check end-to-end browser suite, and a GitHub Actions job that builds the server image and runs real homr on test photos.
+
 ## 6.0.0: practice tools and progress
 New
 - **Hands separately**: practise the right or left hand on its own. In Listen mode your hand's keys light up as a guide while the app plays the other hand; in Wait mode the app waits only for your hand and plays the other hand as you go. Disabled automatically for one-hand pieces.
