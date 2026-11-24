@@ -100,3 +100,20 @@ test('backup: round trip, validation and history merge', () => {
   assert.deepEqual(merged.s.map(x => x.id), ['a', 'c', 'b']);
   assert.deepEqual(merged.t.map(x => x.id), ['d']);
 });
+
+test('restore merges: new pieces added, identical skipped, newer copy wins', () => {
+  const P = require('../music/practice.js');
+  const a = { id: 'a', title: 'A', notes: [1], updatedAt: 100 };
+  const local = [a, { id: 'b', title: 'B local', notes: [1], updatedAt: 300 }, { id: 'c', title: 'C old', notes: [1], updatedAt: 100 }, { id: 'd', title: 'D', notes: [1] }];
+  const incoming = [Object.assign({}, a), { id: 'b', title: 'B backup', notes: [1], updatedAt: 200 }, { id: 'c', title: 'C new', notes: [1], updatedAt: 200 }, { id: 'd', title: 'D edited', notes: [1] }, { id: 'e', title: 'E', notes: [1] }];
+  const m = P.mergeSongs(local, incoming);
+  assert.deepEqual(m.write.map(s => s.title), ['C new', 'D edited', 'E']);
+  assert.deepEqual([m.added, m.updated, m.kept, m.same], [1, 2, 1, 1]);
+});
+
+test('backup reminder counts pieces changed since the last backup', () => {
+  const P = require('../music/practice.js');
+  const songs = [{ id: 'x', updatedAt: 50 }, { id: 'y', updatedAt: 150 }, { id: 'z' }, { id: 'k', builtin: true }];
+  assert.deepEqual(P.unbackedUp(songs, 0).map(s => s.id), ['x', 'y', 'z']);
+  assert.deepEqual(P.unbackedUp(songs, 100).map(s => s.id), ['y']);
+});

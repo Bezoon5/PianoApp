@@ -125,6 +125,8 @@
 
   /* v6: practice history (localStorage; included in backups) */
   const HKEY = 'pc-history-v6';
+  const BKEY = 'pc-last-backup', SNOOZE = 'pc-backup-snooze'; // when the library was last backed up / reminder snoozed
+  const lastBackup = () => +readJSON(BKEY, 0) || 0;
   const history = () => readJSON(HKEY, {});
   function recordSession(s) { const h = PR.addSession(history(), song.id, s); writeJSON(HKEY, h); }
 
@@ -138,10 +140,22 @@
   document.querySelectorAll('[data-nav]').forEach(b => b.onclick = () => nav(b.dataset.nav));
 
   /* ------------------------------ Library ------------------------------- */
+  /* Reminder to back up pieces that exist only on this device */
+  async function renderNudge(songs) {
+    const box = $('#backupNudge'); if (!box) return;
+    songs = songs || await allSongs();
+    const pending = PR.unbackedUp(songs, lastBackup()), snoozed = (+readJSON(SNOOZE, 0) || 0) > Date.now();
+    box.hidden = !pending.length || snoozed;
+    if (!box.hidden) $('#nudgeText').textContent = (pending.length === 1 ? '1 piece is saved only on this device. Back it up or send it' : pending.length + ' pieces are saved only on this device. Back them up or send them') + ' to your other device.';
+  }
+  $('#nudgeSend').onclick = () => sendLibrary(t => { $('#nudgeText').textContent = t; });
+  $('#nudgeLater').onclick = () => { writeJSON(SNOOZE, Date.now() + 7 * 86400000); $('#backupNudge').hidden = true; };
   async function render() {
     const gen = ++renderGen;
-    const imported = (await allSongs()).map(s => Object.assign({}, s, { category: s.category || 'imported' }));
+    const raw = await allSongs();
+    const imported = raw.map(s => Object.assign({}, s, { category: s.category || 'imported' }));
     if (gen !== renderGen) return;
+    renderNudge(raw);
     const hist = history();
     const list = [...built, ...imported].filter(s => libraryFilter === 'all' || s.category === libraryFilter);
     const frag = document.createDocumentFragment();
@@ -206,6 +220,7 @@
     try {
       const fresh = (await allSongs()).find(x => x.id === editing.id) || editing;
       fresh.title = t;
+      fresh.updatedAt = Date.now();
       await put('songs', fresh);
       $('#editDlg').close(); libStatus('Renamed to “' + t + '”.'); render();
     } catch (e) { $('#editStatus').textContent = 'Could not save: ' + e.message; }
@@ -784,6 +799,7 @@
     $('#xmlIn').click();
   };
   async function saveAndOpen(s, label) {
+    s.updatedAt = Date.now();
     try { await put('songs', s); libStatus('Imported “' + s.title + '”' + (label || '') + '.'); }
     catch (err) { libStatus('“' + s.title + '” opened but could not be saved: ' + err.message + '.', true); }
     openSong(s);
@@ -847,24 +863,59 @@
 
   // v6: back up and restore the library and practice history
   function backupStatus(t) { $('#backupStatus').textContent = t; }
-  $('#backupBtn').onclick = async () => {
+  async function backupFile() {
     const songs = await allSongs(), h = history();
-    const data = PR.makeBackup(songs, h);
-    download(JSON.stringify(data), 'piano-companion-backup-' + new Date().toISOString().slice(0, 10) + '.json', 'application/json');
+    const text = JSON.stringify(PR.makeBackup(songs, h));
+    const name = 'piano-companion-backup-' + new Date().toISOString().slice(0, 10) + '.json';
     const sessions = Object.keys(h).reduce((a, k) => a + (h[k] || []).length, 0);
-    backupStatus('Backup saved: ' + songs.length + ' piece' + (songs.length === 1 ? '' : 's') + ' and ' + sessions + ' practice session' + (sessions === 1 ? '' : 's') + '. Keep it in Files, iCloud Drive or OneDrive.');
+    const what = songs.length + ' piece' + (songs.length === 1 ? '' : 's') + ' and ' + sessions + ' practice session' + (sessions === 1 ? '' : 's');
+    return { text, name, what };
+  }
+  function markBackedUp() { writeJSON(BKEY, Date.now()); renderNudge(); }
+  $('#backupBtn').onclick = async () => {
+    const b = await backupFile();
+    download(b.text, b.name, 'application/json');
+    markBackedUp();
+    backupStatus('Backup saved: ' + b.what + '. Keep it in Files, iCloud Drive or OneDrive.');
   };
+  /** Share sheet (AirDrop, Files, Mail…) where supported, otherwise a download. */
+  async function sendLibrary(statusFn) {
+    const b = await backupFile();
+    const file = typeof File === 'function' ? new File([b.text], b.name, { type: 'application/json' }) : null;
+    if (file && navigator.canShare && navigator.canShare({ files: [file] })) {
+      try {
+        await navigator.share({ files: [file], title: 'Piano Companion library' });
+        markBackedUp();
+        statusFn('Sent ' + b.what + '. On the other device open Settings → Restore backup and choose the file.');
+      } catch (e) {
+        if (e && e.name === 'AbortError') statusFn('Not sent.');
+        else { download(b.text, b.name, 'application/json'); markBackedUp(); statusFn('Sharing isn’t available here, so the backup was downloaded instead (' + b.what + ').'); }
+      }
+      return;
+    }
+    download(b.text, b.name, 'application/json');
+    markBackedUp();
+    statusFn('Backup downloaded (' + b.what + '). Copy it to the other device, then open Settings → Restore backup there.');
+  }
+  $('#shareBtn').onclick = () => sendLibrary(backupStatus);
   $('#restoreBtn').onclick = () => $('#restoreIn').click();
   $('#restoreIn').onchange = async e => {
     const f = e.target.files[0]; e.target.value = '';
     if (!f) return;
     let data;
     try { data = PR.readBackup(await f.text()); } catch (err) { backupStatus('Restore failed: ' + err.message + '.'); return; }
+    // Merge: add new pieces, keep whichever copy of a piece was changed last.
+    const plan = PR.mergeSongs(await allSongs(), data.songs);
     let restored = 0;
-    try { for (const s of data.songs) { await put('songs', s); restored++; } }
-    catch (err) { backupStatus('Restored ' + restored + ' of ' + data.songs.length + ' pieces, then stopped: ' + err.message + '.'); return; }
+    try { for (const s of plan.write) { await put('songs', s); restored++; } }
+    catch (err) { backupStatus('Restored ' + restored + ' of ' + plan.write.length + ' pieces, then stopped: ' + err.message + '.'); return; }
     writeJSON(HKEY, PR.mergeHistory(history(), data.history));
-    backupStatus('Restored ' + restored + ' piece' + (restored === 1 ? '' : 's') + ' and practice history' + (data.skipped ? ' (' + data.skipped + ' damaged entr' + (data.skipped === 1 ? 'y' : 'ies') + ' skipped)' : '') + '.');
+    const n = (k, w) => k + ' ' + w + (k === 1 ? '' : 's');
+    const parts = [n(plan.added, 'new piece')];
+    if (plan.updated) parts.push(n(plan.updated, 'newer version') + ' of pieces you had');
+    if (plan.kept) parts.push(n(plan.kept, 'piece') + ' kept as on this device (changed more recently here)');
+    if (plan.same) parts.push(plan.same + ' already up to date');
+    backupStatus('Restored: ' + parts.join(', ') + '; practice history merged' + (data.skipped ? ' (' + n(data.skipped, 'damaged entry').replace('entrys', 'entries') + ' skipped)' : '') + '.');
     render();
   };
 
@@ -909,7 +960,7 @@
   window.addEventListener('pagehide', () => endWaitSession());
 
   window.PCApp = {
-    nav, openSong, saveSong: s => put('songs', s), download, audio, instrument, importMusicXML,
+    nav, openSong, saveSong: s => { s.updatedAt = Date.now(); return put('songs', s); }, download, audio, instrument, importMusicXML,
     _render: render, _put: put, _position: position, _history: history,
     _state: () => ({ samplerState, soundPref, sheetReady, segs: segs.length, hand, loopOn, loopRange, pass, waitIdx, waitEvs: waitEvs.length, waitPasses, playing })
   };

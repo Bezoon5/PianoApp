@@ -5,7 +5,7 @@
  *   Loops            : resolveLoop, speedTrainer
  *   Metronome        : clicks, countIn
  *   Progress         : addSession, summarise, streak, trickiest, relativeDay
- *   Backup           : makeBackup, readBackup, mergeHistory
+ *   Backup           : makeBackup, readBackup, mergeHistory, mergeSongs, unbackedUp
  */
 (function (root, factory) {
   if (typeof module === 'object' && module.exports) module.exports = factory();
@@ -168,5 +168,27 @@
     return out;
   }
 
-  return { inHand, waitEvents, accompaniment, resolveLoop, speedTrainer, clickStep, clicks, countIn, addSession, summarise, streak, trickiest, relativeDay, dayKey, makeBackup, readBackup, mergeHistory };
+  /**
+   * Restoring a backup on a device that already has pieces: new pieces are added,
+   * identical ones skipped, and when both copies changed the newer one wins
+   * (by updatedAt; a copy with a date beats one without).
+   */
+  function mergeSongs(local, incoming) {
+    const have = new Map((local || []).map(s => [s.id, s]));
+    const out = { write: [], added: 0, updated: 0, kept: 0, same: 0 };
+    (incoming || []).forEach(s => {
+      const mine = have.get(s.id);
+      if (!mine) { out.write.push(s); out.added++; return; }
+      if (JSON.stringify(mine) === JSON.stringify(s)) { out.same++; return; }
+      const a = mine.updatedAt || 0, b = s.updatedAt || 0;
+      if (b > a || (!a && !b)) { out.write.push(s); out.updated++; } else out.kept++;
+    });
+    return out;
+  }
+  /** Pieces changed since the last backup (all of them if there never was one). */
+  function unbackedUp(songs, lastBackup) {
+    return (songs || []).filter(s => !s.builtin && (!lastBackup || (s.updatedAt || 0) > lastBackup));
+  }
+
+  return { inHand, waitEvents, accompaniment, resolveLoop, speedTrainer, clickStep, clicks, countIn, addSession, summarise, streak, trickiest, relativeDay, dayKey, makeBackup, readBackup, mergeHistory, mergeSongs, unbackedUp };
 });

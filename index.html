@@ -42,6 +42,7 @@
         <button id="midi">🎼<b>MIDI</b><small>Exact notes</small></button>
       </div>
     </div>
+    <div id="backupNudge" class="nudge" hidden><span id="nudgeText"></span><button id="nudgeSend" class="primary">Back up or send</button><button id="nudgeLater">Not now</button></div>
     <div class="head"><h2>Playable music</h2><span id="streak"></span><span id="libStatus"></span></div>
     <div class="filters"><button data-filter="all" class="primary">All</button><button data-filter="christmas">Christmas</button><button data-filter="imported">Imported &amp; scanned</button></div>
     <div id="songs" class="cards"></div>
@@ -170,8 +171,8 @@
   <h3>MIDI keyboard</h3>
   <p id="midiStatus" class="muted">Checking for MIDI keyboards…</p>
   <h3>Backup</h3>
-  <p class="muted">Save your imported music and practice history to a file, or restore them on another device.</p>
-  <div class="actions left"><button id="backupBtn">Back up library</button><button id="restoreBtn">Restore backup</button></div>
+  <p class="muted">Save your imported music and practice history to a file, or send it to your other device (AirDrop, Files or email on iPhone). Restoring adds new pieces and keeps the most recently changed copy of each piece.</p>
+  <div class="actions left"><button id="shareBtn" class="primary">Send to another device</button><button id="backupBtn">Back up library</button><button id="restoreBtn">Restore backup</button></div>
   <p id="backupStatus" class="muted"></p>
   <h3>Install &amp; offline</h3>
   <p id="installHint" class="muted"></p>
