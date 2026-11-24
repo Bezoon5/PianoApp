@@ -1,0 +1,55 @@
+name: CI
+on:
+  push: {branches: [main]}
+  pull_request: {}
+  workflow_dispatch: {}
+jobs:
+  unit:
+    name: Unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: 22}
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - name: Syntax check
+        run: for f in app.js sw.js omr/*.js music/*.js; do node --check "$f"; done
+      - name: Node tests
+        run: npm test
+      - name: Recognition server API (stub homr)
+        run: pip install starlette uvicorn python-multipart requests && python tests/server/test_server.py
+      - name: Verovio renders every fixture
+        run: pip install verovio && python tests/verovio_check.py
+  browser:
+    name: Browser tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: 22}
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - name: Install Playwright, Verovio and server dependencies
+        run: |
+          pip install playwright verovio starlette uvicorn python-multipart requests
+          python -m playwright install --with-deps chromium
+      - name: Start the app with real Verovio
+        run: |
+          python tests/browser/server.py 8080 > /tmp/app-server.log 2>&1 &
+          for i in $(seq 1 30); do curl -sf http://127.0.0.1:8080/index.html > /dev/null && break; sleep 1; done
+      - name: Practice
+        run: python -u tests/browser/practice6.py http://127.0.0.1:8080/index.html
+      - name: Stress (library, scanning, storage)
+        if: success() || failure()
+        run: python -u tests/browser/stress.py http://127.0.0.1:8080/index.html
+      - name: Offline app
+        if: success() || failure()
+        run: python -u tests/browser/offline.py http://127.0.0.1:8080/index.html
+      - name: AI recognition end to end
+        if: success() || failure()
+        run: python -u tests/browser/homr.py
+      - name: Backups
+        if: (success() || failure()) && hashFiles('tests/browser/backup.py') != ''
+        run: python -u tests/browser/backup.py

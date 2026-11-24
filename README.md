@@ -60,7 +60,7 @@ tests/                              Node tests, fixtures, browser suites, Verovi
 ## Run and test
 ```
 npm start                                   # http://localhost:8080
-npm test                                    # 63 Node tests
+npm test                                    # 66 Node tests (all suites also run on GitHub for every pull request)
 python3 tests/server/test_server.py         # recognition server API (stub homr; needs starlette, uvicorn, python-multipart, requests)
 python3 tests/browser/homr.py               # AI recognition end to end (Playwright), 25 checks
 pip install verovio && python3 tests/verovio_check.py
