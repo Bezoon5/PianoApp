@@ -51,13 +51,17 @@
 
 <section id="practice" class="screen">
   <header><button data-nav="library">← Music</button><div><b id="songTitle">Practice</b><small id="songMeta"></small></div><div><button id="play" class="primary">Play</button><button id="stop">Stop</button></div></header>
-  <div class="transport"><button id="listen" class="primary">Listen</button><button id="wait">Wait mode</button><label>Tempo <input id="tempo" type="range" min="30" max="220"><output id="tempoOut"></output></label><button id="viewToggle">Simple view</button><span id="scoreOut"></span><span id="measure">Measure 1</span></div>
+  <div class="transport"><button id="listen" class="primary">Listen</button><button id="wait">Wait mode</button><button id="along" title="Play at tempo; each note is marked on time, early, late, missed or wrong">Play along</button><label>Tempo <input id="tempo" type="range" min="30" max="220"><output id="tempoOut"></output></label><button id="viewToggle">Simple view</button><button id="fallToggle" aria-pressed="false" title="Notes fall onto the keys">Falling notes</button><span id="scoreOut"></span><span id="measure">Measure 1</span></div>
   <div class="tools">
     <label>Hands <select id="handSel"><option value="both">Both</option><option value="right">Right only</option><option value="left">Left only</option></select></label>
     <span class="loopctl"><button id="loopBtn" aria-pressed="false">⟲ Loop</button><label>bars <input id="loopFrom" inputmode="numeric" value="1"></label><label>to <input id="loopTo" inputmode="numeric" value="4"></label></span>
     <label class="check"><input id="trainer" type="checkbox"> Speed trainer</label>
     <label class="check"><input id="metro" type="checkbox"> Metronome</label>
     <label class="check"><input id="countIn" type="checkbox"> Count-in</label>
+    <label class="along-only">Timing <select id="tolSel"><option value="strict">Strict</option><option value="normal">Normal</option><option value="relaxed">Relaxed</option></select></label>
+    <button id="micBtn" aria-pressed="false" title="Listen to your piano through the microphone">🎤 Mic</button><span id="micMeter" class="meter" hidden><i></i></span>
+    <button id="recBtn" title="Record what you play">● Record</button><button id="takesBtn">Takes</button>
+    <span id="micStatus" aria-live="polite"></span>
     <span id="toolStatus" aria-live="polite"></span>
   </div>
   <main class="practice">
@@ -180,6 +184,7 @@
   <p id="offlineStatus" class="muted">Saves the app, sheet music engine, scanning tools and piano sound on this device.</p>
   <div class="actions"><button id="settingsDone" class="primary">Done</button></div>
 </article></dialog>
+<dialog id="takesDlg"><article><h2>Your takes</h2><p class="muted">Recordings of this piece on this device (the last 10 are kept).</p><div id="takesList"></div><div class="actions"><button id="takesDone" class="primary">Done</button></div></article></dialog>
 <dialog id="summaryDlg"><article><h2>Practice complete</h2><div id="summaryBody"></div><div class="actions"><button id="summaryAgain">Play again</button><button id="summaryDone" class="primary">Done</button></div></article></dialog>
 <dialog id="partDlg"><article><h2>Choose the part to practise</h2><p class="muted">This score has several parts. The piano part is suggested.</p><div id="partList" class="partlist"></div><div class="actions"><button id="partCancel">Cancel</button><button id="partOk" class="primary">Import</button></div></article></dialog>
 <dialog id="editDlg"><article><h2>Edit piece</h2><label>Title<input id="editTitle" maxlength="120"></label><p id="editStatus" class="muted"></p><div class="actions"><button id="editDelete" class="danger">Delete</button><span class="spacer"></span><button id="editCancel">Cancel</button><button id="editSave" class="primary">Save</button></div></article></dialog>
@@ -201,6 +206,7 @@
 <script src="omr/homr.js"></script>
 <script src="music/notation.js"></script>
 <script src="music/practice.js"></script>
+<script src="music/listen.js"></script>
 <script src="app.js"></script>
 <script src="omr/workflow.js"></script>
 </body>
