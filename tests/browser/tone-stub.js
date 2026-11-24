@@ -7,6 +7,10 @@
   const T = window.Tone = {
     start: () => started ? Promise.resolve() : new Promise(r => setTimeout(() => { started = true; r(); }, 150)),
     now: () => performance.now() / 1000,
+    // audio clock = performance clock in seconds, no output latency (play-along timing tests rely on this)
+    context: { rawContext: { get currentTime() { return performance.now() / 1000; }, outputLatency: 0, baseLatency: 0, sampleRate: 48000,
+      createMediaStreamSource: () => ({ connect() {}, disconnect() {} }),
+      createAnalyser: () => ({ fftSize: 2048, smoothingTimeConstant: 0, getFloatTimeDomainData(buf) { (window.__micFeed || (() => buf.fill(0)))(buf); } }) } },
     Frequency: m => ({ toNote: () => 'M' + m }),
     Time: () => ({ toSeconds: () => 0.1 }),
     Draw: { schedule: fn => setTimeout(fn, 0) },

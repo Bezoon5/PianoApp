@@ -1,5 +1,15 @@
 # Changelog
 
+## 6.3.0: microphone, play along, recording, falling notes
+New
+- **🎤 Mic: listen to your piano through the microphone.** Brings Wait mode and wrong-note checking to iPhone and iPad, where MIDI keyboards can't connect to web apps. Because the app knows which notes come next, it checks for exactly those notes (single notes and simple chords), flags clearly wrong notes, ignores the app's own accompaniment, and stays silent for your notes because your piano makes the sound. A short calibration measures the room's background noise first.
+- **Play along:** the music runs at tempo with a count-in, and each note you play is marked on time, early, late, missed or wrong, with a running score, a summary (including whether you tend to rush or drag) and your trickiest bars. Choose Strict, Normal or Relaxed timing. Works with a MIDI keyboard (most precise), the on-screen keys or the microphone.
+- **● Record and Takes:** record what you play (notes, plus sound when the microphone is on), keep the last 10 takes per piece, play them back with the score following along, and download them as MIDI or sound files.
+- **Falling notes:** notes fall onto the keys they belong to, coloured by hand, and by result in Play along.
+Other
+- On phones the practice controls are more compact and the keyboard scrolls to the piece's notes.
+- If Piano Companion is open in another tab during an update, the app waits for it instead of opening without your library.
+
 ## 6.2.0: notes on the photo, easier backups, automatic testing
 New
 - **AI scans: notes on the photo.** In review, bars on the photo are coloured like the Recognised view (red = doesn't add up, amber = check), the selected bar and note are marked on the photo, and tapping the photo selects the nearest note. Next issue scrolls both views to the bar.

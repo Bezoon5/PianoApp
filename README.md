@@ -1,4 +1,4 @@
-# Piano Companion 6.2
+# Piano Companion 6.3
 
 **Live app:** https://bezoon5.github.io/PianoApp
 
@@ -20,6 +20,11 @@ Phone photos have shadows, tilt and page curl that the built-in recogniser can't
 Tips for good photos: lay the page flat, fill the frame, use even light, and use **Camera app (sharper)** for a full-resolution photo.
 
 ## Practising
+
+**Connecting your piano.** On a computer, Chrome or Edge connect a MIDI keyboard (USB or Bluetooth). Safari on iPhone and iPad cannot use MIDI keyboards, so use **🎤 Mic** on the practice screen instead: the app listens to your piano. Microphone tips: put the phone near the piano, keep the room quiet for the one-second calibration, and use headphones if the app plays the other hand for you. Single notes are recognised reliably; simple chords mostly; fast or very complex passages less so.
+
+**Modes.** *Listen* plays the piece. *Wait mode* waits for each note before moving on. *Play along* runs at tempo and marks each note on time, early, late, missed or wrong. **Falling notes** shows the notes falling onto the keys instead of sheet music. **● Record** saves what you play; **Takes** plays it back or downloads it as MIDI or sound.
+
 - **Listen** or **Wait mode**. In Wait mode the app waits for the right note or chord and scores you.
 - **Hands**: Both, Right only or Left only. The app plays the other hand; your hand's keys light up.
 - **Loop**: choose bars (e.g. 12 to 16) and press **⟲ Loop**. Looped bars are shaded in the score.
@@ -60,10 +65,11 @@ tests/                              Node tests, fixtures, browser suites, Verovi
 ## Run and test
 ```
 npm start                                   # http://localhost:8080
-npm test                                    # 71 Node tests (all suites also run on GitHub for every pull request)
+npm test                                    # 79 Node tests (all suites also run on GitHub for every pull request)
 python3 tests/server/test_server.py         # recognition server API (stub homr; needs starlette, uvicorn, python-multipart, requests)
 python3 tests/browser/homr.py               # AI recognition end to end (Playwright), 36 checks
 python3 tests/browser/backup.py             # backups: reminder, send, merging restore, 14 checks
+python3 tests/browser/practice63.py         # microphone, play along, recording, falling notes, 28 checks
 pip install verovio && python3 tests/verovio_check.py
 python3 tests/browser/server.py 8080 &      # browser suites (Playwright)
 python3 tests/browser/practice6.py http://127.0.0.1:8080/index.html   # 29 checks

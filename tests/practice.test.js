@@ -117,3 +117,39 @@ test('backup reminder counts pieces changed since the last backup', () => {
   assert.deepEqual(P.unbackedUp(songs, 0).map(s => s.id), ['x', 'y', 'z']);
   assert.deepEqual(P.unbackedUp(songs, 100).map(s => s.id), ['y']);
 });
+
+test('play along: on time, early, late, wrong and missed notes', () => {
+  const P = require('../music/practice.js');
+  const exp = [{ beat: 0, midi: 60 }, { beat: 1, midi: 62 }, { beat: 2, midi: 64 }, { beat: 3, midi: 65 }, { beat: 4, midi: 67 }];
+  const j = P.timingJudge(exp, { spb: 0.5, tolerance: 'normal' });   // 120 BPM, ±90 ms on time
+  assert.equal(j.press(60, 0.1).result, 'on');                        // 50 ms late
+  const e = j.press(62, 0.7);                                          // 150 ms early
+  assert.equal(e.result, 'early'); assert.equal(e.ms, -150);
+  assert.equal(j.press(64, 2.3).result, 'late');                       // 150 ms late
+  assert.equal(j.press(61, 3).result, 'wrong');                        // wrong key
+  assert.equal(j.press(60, 1.5).result, 'wrong', 'a note already played does not count twice');
+  assert.deepEqual(j.sweep(3.2).map(n => n.midi), []);                 // 65 not yet too late (window 250 ms)
+  assert.deepEqual(j.sweep(3.6).map(n => n.midi), [65]);
+  assert.equal(j.press(67, 4).result, 'on');
+  const s = j.summary();
+  assert.deepEqual([s.on, s.early, s.late, s.missed, s.wrong, s.total], [2, 1, 1, 1, 2, 5]);
+  assert.equal(s.timing, 50); assert.equal(s.accuracy, 57); assert.equal(s.meanMs, 13);
+  // chords: each note is matched on its own
+  const c = P.timingJudge([{ beat: 0, midi: 60 }, { beat: 0, midi: 64 }], { spb: 0.5 });
+  assert.equal(c.press(64, 0.02).result, 'on'); assert.equal(c.press(60, -0.02).result, 'on');
+  assert.equal(P.timingJudge([], { spb: 0.5, tolerance: 'strict' }).toleranceMs, 50);
+});
+
+test('a recorded take becomes a valid standard MIDI file', () => {
+  const P = require('../music/practice.js');
+  const midi = P.takeToMidi([{ t: 0, midi: 60, vel: 0.8, on: true }, { t: 500, midi: 60, on: false }, { t: 500, midi: 64, vel: 0.5, on: true }, { t: 1000, midi: 64, on: false }], 'My take');
+  const txt = String.fromCharCode(...midi.slice(0, 4)) + String.fromCharCode(...midi.slice(14, 18));
+  assert.equal(txt, 'MThdMTrk');
+  const len = (midi[18] << 24) | (midi[19] << 16) | (midi[20] << 8) | midi[21];
+  assert.equal(len, midi.length - 22, 'track length matches');
+  // parse it back with the app's own MIDI reader if available, else check events by hand
+  const body = Array.from(midi.slice(22));
+  assert.ok(body.join(',').includes([0x90, 60, 102].join(',')), 'note on C4 velocity 102');
+  assert.ok(body.join(',').includes([0x83, 0x60, 0x80, 60].join(',')), '480 ticks later C4 off');
+  assert.deepEqual(body.slice(-4), [0, 0xff, 0x2f, 0], 'end of track');
+});

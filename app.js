@@ -14,6 +14,12 @@
   const tools = Object.assign({ metronome: false, countIn: true, trainer: false, trainerStart: 70 }, readJSON('pc-tools-v6', {}));
   let hand = 'both', loopOn = false, loopRange = null, pass = 0, targetBpm = 100;
   let waitEvs = [], waitIdx = 0, waitRange = null, waitPasses = 0, barStats = {}, sessionLogged = false, accompTimers = [];
+  // v6.3: microphone, play along, recording, falling notes
+  let mic = null, along = null, recording = null, takePlay = null, lastPos = 0;
+  let fallingOn = localStorage.getItem('pc-falling') === '1';
+  const judged = new Map();   // 'beat:midi' -> play-along result, for colouring falling notes
+  const NOTE_NAMES = ['C', 'C♯', 'D', 'E♭', 'E', 'F', 'F♯', 'G', 'A♭', 'A', 'B♭', 'B'];
+  const noteName = m => NOTE_NAMES[m % 12] + (Math.floor(m / 12) - 1);
 
   /* ------------------------- Built-in repertoire ------------------------- */
   const N = { C3: 48, D3: 50, E3: 52, F3: 53, G3: 55, A3: 57, B3: 59, C4: 60, D4: 62, E4: 64, F4: 65, G4: 67, A4: 69, B4: 71, C5: 72, D5: 74, E5: 76, F5: 77, G5: 79, A5: 81, B5: 83, C6: 84 };
@@ -56,13 +62,19 @@
     return new Promise(ok => {
       if (!window.indexedDB) return ok(null);
       let r;
-      try { r = indexedDB.open(DB_NAME, 1); } catch (e) { return ok(null); }
+      try { r = indexedDB.open(DB_NAME, 2); } catch (e) { return ok(null); }
       r.onupgradeneeded = () => {
         const d = r.result;
         if (!d.objectStoreNames.contains('songs')) d.createObjectStore('songs', { keyPath: 'id' });
         if (!d.objectStoreNames.contains('scans')) d.createObjectStore('scans', { keyPath: 'id' });
+        if (!d.objectStoreNames.contains('takes')) d.createObjectStore('takes', { keyPath: 'id' });   // v6.3 recordings
       };
-      r.onsuccess = () => ok(r.result); r.onerror = () => ok(null); r.onblocked = () => ok(null);
+      // Another tab with an older version can block the upgrade: give it a few seconds to
+      // let go (the upgrade then completes) before carrying on without storage.
+      let blocked = 0;
+      r.onsuccess = () => { clearTimeout(blocked); const d = r.result; d.onversionchange = () => d.close(); ok(d); };
+      r.onerror = () => { clearTimeout(blocked); ok(null); };
+      r.onblocked = () => { blocked = setTimeout(() => { ok(null); setTimeout(() => libStatus('Your saved music could not be opened because Piano Companion is open in another tab. Close the other tab and reload.', true), 0); }, 4000); };
     });
   }
   function allSongs() {
@@ -132,7 +144,7 @@
 
   /* ----------------------------- Navigation ----------------------------- */
   function nav(id) {
-    if (id !== 'practice') { endWaitSession(); stop(); }
+    if (id !== 'practice') { endWaitSession(); endAlongSession(); if (recording) stopRecording(); stop(); if (mic) stopMic(); }
     document.querySelectorAll('.screen').forEach(x => x.classList.toggle('active', x.id === id));
     if (id === 'library') render();
   }
@@ -267,6 +279,7 @@
     loadSampler();
   }
   function click(time, accent) {
+    micIgnore(accent ? 84 : 79, time + 0.08);
     if (!clickSynth) { clickSynth = new Tone.Synth({ oscillator: { type: 'square' }, envelope: { attack: 0.001, decay: 0.04, sustain: 0, release: 0.02 } }).toDestination(); clickSynth.volume.value = -12; }
     clickSynth.triggerAttackRelease(accent ? 'C6' : 'G5', 0.03, time, accent ? 1 : 0.6);
   }
@@ -310,16 +323,25 @@
     $('#loopTo').value = segs[Math.min(segs.length - 1, fi + 3)] ? segs[Math.min(segs.length - 1, fi + 3)].number : 1;
     toolStatus('');
     nav('practice');
-    requestAnimationFrame(() => { piano(+$('#range').value); showView(); });
+    requestAnimationFrame(() => { piano(+$('#range').value); centerKeys(s); showView(); });
+    setFalling(fallingOn);
     if (window.Tone && soundPref === 'piano') loadSampler();
   }
   $('#tempo').oninput = e => {
     $('#tempoOut').value = e.target.value + ' BPM';
     targetBpm = +e.target.value;
+    if (mode === 'along' && playing) { endAlongSession(); stop(); toolStatus('Tempo changed: press Play to start again at ' + targetBpm + ' BPM.'); return; }
     if (window.Tone && playing && !(tools.trainer && loopOn)) Tone.Transport.bpm.rampTo(targetBpm, 0.1);
   };
-  $('#listen').onclick = () => { endWaitSession(); stop(); mode = 'listen'; $('#listen').className = 'primary'; $('#wait').className = ''; clearExpected(); updateScore(); };
-  $('#wait').onclick = () => { stop(); mode = 'wait'; $('#wait').className = 'primary'; $('#listen').className = ''; startWait(); };
+  function setMode(m) {
+    mode = m;
+    ['listen', 'wait', 'along'].forEach(id => { $('#' + id).className = id === m ? 'primary' : ''; });
+    $('#practice').classList.toggle('mode-along', m === 'along');
+    updateMicExpected();
+  }
+  $('#listen').onclick = () => { endWaitSession(); endAlongSession(); stop(); setMode('listen'); clearExpected(); updateScore(); };
+  $('#wait').onclick = () => { endAlongSession(); stop(); setMode('wait'); startWait(); };
+  $('#along').onclick = () => { endWaitSession(); endAlongSession(); stop(); setMode('along'); clearExpected(); startAlong(); };
 
   /* v6 practice tools ------------------------------------------------------ */
   function toolStatus(t) { $('#toolStatus').textContent = t; }
@@ -328,7 +350,7 @@
   $('#metro').onchange = e => { tools.metronome = e.target.checked; saveTools(); };
   $('#countIn').onchange = e => { tools.countIn = e.target.checked; saveTools(); };
   $('#trainer').onchange = e => { tools.trainer = e.target.checked; saveTools(); if (tools.trainer && !loopOn) toolStatus('Speed trainer works with a loop: turn on Loop and choose the bars.'); };
-  $('#handSel').onchange = e => { hand = e.target.value; if (mode === 'wait') { stop(); startWait(); } else if (playing) stop(); };
+  $('#handSel').onchange = e => { hand = e.target.value; if (mode === 'wait') { stop(); startWait(); } else if (mode === 'along') { endAlongSession(); stop(); } else if (playing) stop(); if (mic) micHint(); };
   function setLoop(on) {
     loopOn = on;
     $('#loopBtn').classList.toggle('primary', on);
@@ -354,7 +376,7 @@
       toolStatus(r.error ? r.error : 'Looping ' + r.label + '.');
       if (r.error) setLoop(false);
     } else toolStatus('');
-    if (mode === 'wait') startWait(); else if (was) $('#play').click();
+    if (mode === 'wait') startWait(); else if (mode === 'along') { endAlongSession(); if (was) startAlong(); } else if (was) $('#play').click();
   };
   ['#loopFrom', '#loopTo'].forEach(id => $(id).onchange = () => {
     if (!loopOn) return;
@@ -368,6 +390,7 @@
   $('#play').onclick = async () => {
     if (!song) return;
     if (mode === 'wait') { stop(); startWait(); return; }
+    if (mode === 'along') { endAlongSession(); startAlong(); return; }
     const range = activeRange();
     if (range.error) { toolStatus(range.error); return; }
     try { await audio(); } catch (e) { $('#measure').textContent = 'Audio unavailable'; return; }
@@ -379,7 +402,7 @@
     const events = song.notes.map(n => Object.assign({}, n, { guide: hand !== 'both' && PR.inHand(n, hand), time: beatsToTicks(n.startBeat) }));
     part = new Tone.Part((time, n) => {
       const dur = beatsToTicks(n.durationBeats);
-      if (!n.guide) instrument().triggerAttackRelease(Tone.Frequency(n.midi, 'midi').toNote(), dur, time, n.velocity || 0.7);
+      if (!n.guide) { instrument().triggerAttackRelease(Tone.Frequency(n.midi, 'midi').toNote(), dur, time, n.velocity || 0.7); micIgnore(n.midi, time + Tone.Time(dur).toSeconds()); }
       Tone.Draw.schedule(() => light(n.midi, 1, n.guide), time);
       Tone.Draw.schedule(() => light(n.midi, 0, n.guide), time + Tone.Time(dur).toSeconds());
     }, events).start(0);
@@ -408,9 +431,10 @@
     Tone.Transport.start(at, beatsToTicks(range.startBeat));
     tick();
   };
-  $('#stop').onclick = () => { stop(); if (mode === 'wait') endWaitSession(); };
+  $('#stop').onclick = () => { if (mode === 'along') endAlongSession(); stop(); if (mode === 'wait') endWaitSession(); };
   function stop(redraw) {
     playing = false;
+    endTakePlay();
     cancelAnimationFrame(anim);
     if (part) { part.dispose(); part = null; }
     if (metroPart) { metroPart.dispose(); metroPart = null; }
@@ -432,7 +456,7 @@
           inLoop = true; lastBeat = b;
         }
       } else lastBeat = b;
-      position(b);
+      if (mode === 'along' && along) alongTick(); else position(b);
     }
     anim = requestAnimationFrame(tick);
   }
@@ -447,6 +471,7 @@
     toolStatus(msg + '.');
   }
   function position(beat) {
+    lastPos = beat;
     const seg = segAt(beat);
     if (seg) $('#measure').textContent = 'Measure ' + seg.number;
     if (sheetReady && seg) window.PCNotation.highlight(seg.measure, beat - seg.play);
@@ -458,30 +483,46 @@
   // A release that arrives while audio is still starting cancels the pending
   // note for every input (touch and MIDI), so nothing is left sounding.
   const pendingOn = new Map();
-  async function noteOn(m, velocity) {
+  /**
+   * opt.silent: the note came from the microphone (your piano makes the sound, so the
+   * app doesn't play it). opt.ctxTime: when it was played, in audio-clock seconds
+   * (for play-along timing); defaults to now.
+   */
+  async function noteOn(m, velocity, opt) {
+    opt = opt || {};
+    const at = opt.ctxTime != null ? opt.ctxTime : audioNow();
+    recordNote(m, velocity, true);
     const tok = ++pressSeq;
     pendingOn.set(m, tok);
     try { await audio(); } catch (e) { pendingOn.delete(m); return false; }
     if (pendingOn.get(m) !== tok) return false;
     pendingOn.delete(m);
-    const inst = instrument();
-    inst.triggerAttack(Tone.Frequency(m, 'midi').toNote(), undefined, velocity || 0.75);
-    attacked.set(m, inst);
+    if (!opt.silent) {
+      const inst = instrument();
+      inst.triggerAttack(Tone.Frequency(m, 'midi').toNote(), undefined, velocity || 0.75);
+      attacked.set(m, inst);
+    }
     held.set(m, (held.get(m) || 0) + 1);
     light(m, 1);
     if (mode === 'wait') checkWait(m);
+    else if (mode === 'along') alongPress(m, at);
     return true;
   }
   function noteOff(m) {
+    recordNote(m, 0, false);
     if (pendingOn.has(m)) { pendingOn.delete(m); return; }
     const c = (held.get(m) || 0) - 1;
     if (c > 0) { held.set(m, c); return; }
     held.delete(m);
-    const inst = attacked.get(m) || synth;
+    const inst = attacked.get(m);
     attacked.delete(m);
     if (inst && window.Tone) inst.triggerRelease(Tone.Frequency(m, 'midi').toNote());
     light(m, 0);
   }
+  /** The audio clock (seconds); 0 before audio starts. */
+  function audioNow() { try { return window.Tone ? Tone.context.rawContext.currentTime : 0; } catch (e) { return 0; } }
+  /** Convert an event's timeStamp (performance clock) to the audio clock. */
+  function ctxTimeOf(ev) { const now = audioNow(); return ev && ev.timeStamp && now ? now - Math.max(0, performance.now() - ev.timeStamp) / 1000 : now; }
 
   const bk = new Set([1, 3, 6, 8, 10]), ranges = { 61: [36, 96], 76: [28, 103], 88: [21, 108] };
   function piano(size) {
@@ -501,19 +542,28 @@
         try { await audio(); } catch (e) { return; }
         if (pressed.get(m) !== tok) return;
         pressed.set(m, 'on');
-        noteOn(m, 0.75);
+        noteOn(m, 0.75, { ctxTime: ctxTimeOf(ev) });
       };
       const up = () => { const p = pressed.get(m); pressed.delete(m); if (p === 'on') noteOff(m); };
       k.onpointerup = up; k.onpointerleave = up; k.onpointercancel = up;
       el.append(k);
     }
   }
+  /** On narrow screens, scroll the keyboard so the piece's notes are in view. */
+  function centerKeys(s) {
+    const wrap = $('.pwrap'); if (!wrap || !s || !s.notes.length || wrap.scrollWidth <= wrap.clientWidth + 4) return;
+    const ms = s.notes.map(n => n.midi).sort((a, b) => a - b), lo = ms[Math.floor(ms.length * 0.05)], hi = ms[Math.floor(ms.length * 0.95)];
+    const kl = document.querySelector('#piano [data-m="' + lo + '"]'), kh = document.querySelector('#piano [data-m="' + hi + '"]');
+    if (!kl || !kh) return;
+    const mid = (kl.offsetLeft + kh.offsetLeft + kh.offsetWidth) / 2;
+    wrap.scrollLeft = Math.max(0, mid - wrap.clientWidth / 2);
+  }
   function light(m, on, guide) { const k = document.querySelector('#piano [data-m="' + m + '"]'); if (k) k.classList.toggle(guide ? 'guide' : 'on', !!on); }
 
   /* Web MIDI ---------------------------------------------------------------- */
   function midiStatus(t) { const el = $('#midiStatus'); if (el) el.textContent = t; }
   async function connectMidi() {
-    if (!navigator.requestMIDIAccess) { midiStatus('MIDI keyboards are not supported in this browser (Safari on iPad does not support Web MIDI). Use Chrome or Edge on a computer.'); return; }
+    if (!navigator.requestMIDIAccess) { midiStatus('MIDI keyboards are not supported in this browser (Safari on iPhone and iPad does not support Web MIDI). On iPhone and iPad, use 🎤 Mic on the practice screen to listen to your piano instead; on a computer, Chrome or Edge can connect a MIDI keyboard.'); return; }
     try {
       const access = await navigator.requestMIDIAccess();
       const bind = () => {
@@ -522,7 +572,7 @@
           n++;
           input.onmidimessage = e => {
             const [st, note, vel] = e.data, cmd = st & 0xf0;
-            if (cmd === 0x90 && vel > 0) noteOn(note, vel / 127);
+            if (cmd === 0x90 && vel > 0) noteOn(note, vel / 127, { ctxTime: ctxTimeOf(e) });
             else if (cmd === 0x80 || (cmd === 0x90 && vel === 0)) noteOff(note);
           };
         });
@@ -559,12 +609,14 @@
     notes.forEach(n => {
       const at = (delay || 0) + n.startBeat - t0;
       inst.triggerAttackRelease(Tone.Frequency(n.midi, 'midi').toNote(), Math.max(0.05, n.durationBeats * spb), now + at * spb, (n.velocity || 0.7) * 0.85);
+      micIgnore(n.midi, now + (at + n.durationBeats) * spb);
       accompTimers.push(setTimeout(() => light(n.midi, 1, true), at * spb * 1000));
       accompTimers.push(setTimeout(() => light(n.midi, 0, true), (at + n.durationBeats) * spb * 1000));
     });
   }
   function expected() {
     clearExpected();
+    updateMicExpected();
     const ev = waitEvs[waitIdx];
     if (ev) { ev.midis.forEach(m => { const k = document.querySelector('#piano [data-m="' + m + '"]'); if (k) k.classList.add('expect'); }); position(ev.beat); }
     updateScore();
@@ -596,6 +648,7 @@
   function accuracy() { const t = score.hits + score.wrong; return t ? Math.round(score.hits / t * 100) : null; }
   function updateScore() {
     const el = $('#scoreOut'); if (!el) return;
+    if (mode === 'along') { el.textContent = alongScoreText(); return; }
     if (mode !== 'wait' || !song || !waitEvs.length) { el.textContent = ''; return; }
     const pct = Math.round(Math.min(waitIdx, waitEvs.length) / waitEvs.length * 100), acc = accuracy();
     el.textContent = 'Progress ' + pct + '% · Accuracy ' + (acc == null ? '—' : acc + '%');
@@ -645,8 +698,334 @@
     }
     $('#summaryDlg').showModal();
   }
-  $('#summaryAgain').onclick = () => { $('#summaryDlg').close(); startWait(); };
+  $('#summaryAgain').onclick = () => { $('#summaryDlg').close(); if (mode === 'along') startAlong(); else startWait(); };
   $('#summaryDone').onclick = () => $('#summaryDlg').close();
+
+  /* v6.3 Microphone: listen to an acoustic or digital piano (music/listen.js) ------ */
+  function micStatus(t) { $('#micStatus').textContent = t; }
+  function micHint() { if (mic) micStatus('🎤 Listening.' + (hand !== 'both' ? ' Use headphones so the app’s ' + (hand === 'right' ? 'left' : 'right') + ' hand doesn’t confuse the microphone.' : ' Play on your piano.')); }
+  function micIgnore(midi, until) { if (mic) { mic.det.ignore(midi, until + 0.3); mic.det.ignore(midi + 12, until + 0.3); } }
+  function updateMicExpected() {
+    if (!mic) return;
+    if (mode === 'wait' && waitEvs[waitIdx]) mic.det.setExpected(waitEvs[waitIdx].midis);
+    else if (mode === 'along' && along && playing) mic.det.setExpected(alongUpcoming());
+    else mic.det.setExpected(null);
+  }
+  async function startMic() {
+    if (!window.PCListen) { micStatus('Microphone listening is unavailable (music/listen.js did not load).'); return; }
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { micStatus('This browser cannot use the microphone here.'); return; }
+    try { await audio(); } catch (e) { micStatus('Audio is unavailable, so the microphone cannot be used.'); return; }
+    let stream;
+    try { stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } }); }
+    catch (e) {
+      micStatus(e && e.name === 'NotAllowedError' ? 'Microphone access was not allowed. Allow it for this site in your browser settings (iPhone: Settings › Apps › Safari › Microphone), then try again.' : 'Could not start the microphone (' + ((e && (e.message || e.name)) || 'unknown error') + ').');
+      return;
+    }
+    const ctx = Tone.context.rawContext, src = ctx.createMediaStreamSource(stream), an = ctx.createAnalyser();
+    an.fftSize = 8192; an.smoothingTimeConstant = 0; src.connect(an);
+    mic = { stream, ctx, src, an, det: window.PCListen.create({ sampleRate: ctx.sampleRate, fftSize: an.fftSize }), buf: new Float32Array(an.fftSize), timer: 0, offTimers: [] };
+    $('#micBtn').classList.add('primary'); $('#micBtn').setAttribute('aria-pressed', 'true'); $('#micMeter').hidden = false;
+    micStatus('Calibrating: stay quiet for a moment…');
+    const snaps = [];
+    for (let i = 0; i < 6 && mic; i++) { await new Promise(r => setTimeout(r, 180)); if (!mic) return; an.getFloatTimeDomainData(mic.buf); snaps.push(mic.buf.slice()); }
+    if (!mic) return;
+    const all = new Float32Array(snaps.length * mic.buf.length); snaps.forEach((x, i) => all.set(x, i * mic.buf.length));
+    mic.det.calibrate(all);
+    micHint();
+    updateMicExpected();
+    mic.timer = setInterval(pollMic, 30);
+  }
+  function stopMic() {
+    if (!mic) return;
+    clearInterval(mic.timer); mic.offTimers.forEach(clearTimeout);
+    try { mic.src.disconnect(); } catch (e) { /* ignore */ }
+    mic.stream.getTracks().forEach(t => t.stop());
+    mic = null;
+    $('#micBtn').classList.remove('primary'); $('#micBtn').setAttribute('aria-pressed', 'false'); $('#micMeter').hidden = true;
+    micStatus('');
+  }
+  function pollMic() {
+    if (!mic) return;
+    mic.an.getFloatTimeDomainData(mic.buf);
+    const t = mic.ctx.currentTime;
+    if (mode === 'along' && along && playing) mic.det.setExpected(alongUpcoming());
+    let e2 = 0; for (let i = mic.buf.length - 1024; i < mic.buf.length; i++) e2 += mic.buf[i] * mic.buf[i];
+    const db = 10 * Math.log10(e2 / 1024 + 1e-12);
+    $('#micMeter i').style.width = Math.max(0, Math.min(100, (db - mic.det.noiseDb) * 2.5)) + '%';
+    mic.det.process(mic.buf, t).forEach(ev => {
+      const ms = ev.type === 'notes' ? ev.midis : [ev.midi];
+      ms.forEach(m => { noteOn(m, 0.7, { silent: true, ctxTime: ev.time }); mic.offTimers.push(setTimeout(() => noteOff(m), 180)); });
+      if (mic.offTimers.length > 64) mic.offTimers.splice(0, 32);
+      micStatus('🎤 Heard ' + ms.map(noteName).join(' + ') + (ev.type === 'wrong' ? ' (not the note expected)' : ''));
+    });
+  }
+  $('#micBtn').onclick = () => { if (mic) stopMic(); else startMic(); };
+
+  /* v6.3 Play along: timing feedback ---------------------------------------------- */
+  const tolPref = () => localStorage.getItem('pc-tolerance') || (mic ? 'relaxed' : 'normal');
+  $('#tolSel').value = localStorage.getItem('pc-tolerance') || 'normal';
+  $('#tolSel').onchange = e => { localStorage.setItem('pc-tolerance', e.target.value); if (mode === 'along' && playing) { endAlongSession(); startAlong(); } };
+  async function startAlong() {
+    if (!song) return;
+    const range = activeRange();
+    if (range.error) { toolStatus(range.error); return; }
+    try { await audio(); } catch (e) { $('#measure').textContent = 'Audio unavailable'; return; }
+    stop(false);
+    targetBpm = +$('#tempo').value;
+    const spb = 60 / targetBpm;
+    Tone.Transport.bpm.value = targetBpm;
+    const expectedNotes = song.notes.filter(n => PR.inHand(n, hand) && n.startBeat >= range.startBeat - 1e-6 && n.startBeat < range.endBeat - 1e-6)
+      .map(n => ({ beat: n.startBeat, midi: n.midi, hand: n.hand }));
+    if (!expectedNotes.length) { toolStatus('No notes for the ' + (hand === 'both' ? '' : hand + ' hand ') + 'in ' + (range.label || 'this piece') + '.'); return; }
+    along = { range, spb, expected: expectedNotes, judge: PR.timingJudge(expectedNotes, { spb, tolerance: tolPref() }), pass: 0, passes: [], barStats: {}, t0: 0, last: null, started: Date.now(), logged: false };
+    judged.clear();
+    // The app plays the other hand (if any) and lights your keys as a guide.
+    const events = song.notes.map(n => Object.assign({}, n, { mine: PR.inHand(n, hand), time: beatsToTicks(n.startBeat) }));
+    part = new Tone.Part((time, n) => {
+      const dur = beatsToTicks(n.durationBeats);
+      if (!n.mine) { instrument().triggerAttackRelease(Tone.Frequency(n.midi, 'midi').toNote(), dur, time, (n.velocity || 0.7) * 0.85); micIgnore(n.midi, time + Tone.Time(dur).toSeconds()); }
+      Tone.Draw.schedule(() => light(n.midi, 1, true), time);
+      Tone.Draw.schedule(() => light(n.midi, 0, true), time + Tone.Time(dur).toSeconds());
+    }, events).start(0);
+    if (tools.metronome) metroPart = new Tone.Part((time, c) => click(time, c.accent), PR.clicks(segs, song.timeSignature, 0, songEnd(song)).map(c => ({ time: beatsToTicks(c.beat), accent: c.accent }))).start(0);
+    if (loopOn) {
+      Tone.Transport.loop = true; Tone.Transport.loopStart = beatsToTicks(range.startBeat); Tone.Transport.loopEnd = beatsToTicks(range.endBeat);
+    } else {
+      Tone.Transport.loop = false;
+      Tone.Transport.scheduleOnce(t => Tone.Draw.schedule(() => finishAlong(), t), beatsToTicks(range.endBeat + Math.max(1, along.judge.windowMs / 1000 / spb + 0.5)));
+    }
+    // Always count in, so the first note can be on time.
+    const ci = PR.countIn(song.timeSignature);
+    let at = Tone.now() + 0.08;
+    ci.clicks.forEach(c => click(at + c.beat * spb, c.accent));
+    at += ci.beats * spb;
+    along.t0 = at;
+    toolStatus('Play along' + (hand !== 'both' ? ' · ' + hand + ' hand (the app plays the other)' : '') + (loopOn ? ' · looping ' + range.label : '') + (tools.trainer ? ' · speed trainer is paused in Play along' : '') + ' · count-in…');
+    playing = true; lastBeat = range.startBeat; inLoop = false;
+    Tone.Transport.start(at, beatsToTicks(range.startBeat));
+    updateScore(); updateMicExpected();
+    tick();
+  }
+  /** Where the music is, as heard (output latency included), in beats; and which loop pass. */
+  function alongBeat(c) {
+    const ctxRaw = Tone.context.rawContext, lat = ctxRaw.outputLatency || ctxRaw.baseLatency || 0;
+    const r = along.range, el = (c - lat - along.t0) / along.spb;
+    if (!loopOn) return { beat: r.startBeat + el, pass: 0 };
+    const len = r.endBeat - r.startBeat;
+    if (el < 0) return { beat: r.startBeat + el, pass: 0 };
+    return { beat: r.startBeat + (el % len), pass: Math.floor(el / len) };
+  }
+  function alongUpcoming() {
+    if (!along) return null;
+    const { beat } = alongBeat(audioNow()), wb = along.judge.windowMs / 1000 / along.spb;
+    const next = along.judge.notes.filter(n => !n.result && n.beat >= beat - wb && n.beat <= beat + wb);
+    if (!next.length) return null;
+    const first = Math.min(...next.map(n => n.beat));
+    return next.filter(n => n.beat - first < 0.05).map(n => n.midi);
+  }
+  function rollPass() {
+    along.judge.sweep(Infinity).forEach(n => judged.set(n.beat + ':' + n.midi, 'missed'));
+    const sm = along.judge.summary();
+    along.passes.push(sm);
+    along.pass++;
+    along.judge = PR.timingJudge(along.expected, { spb: along.spb, tolerance: tolPref() });
+    judged.clear();
+    toolStatus('Looping ' + along.range.label + ' · pass ' + along.pass + ': on time ' + sm.on + '/' + sm.total + (sm.early ? ' · early ' + sm.early : '') + (sm.late ? ' · late ' + sm.late : '') + (sm.missed ? ' · missed ' + sm.missed : '') + (sm.wrong ? ' · wrong ' + sm.wrong : '') + '.');
+  }
+  function alongPress(m, c) {
+    if (!along || !playing) return;
+    let { beat, pass } = alongBeat(c);
+    const r = along.range, wb = along.judge.windowMs / 1000 / along.spb;
+    if (beat < r.startBeat - wb) return;                 // still counting in
+    // A slightly early first note of the next loop pass arrives just before the wrap.
+    if (loopOn && pass === along.pass && r.endBeat - beat < wb && along.expected.some(n => n.midi === m && n.beat - r.startBeat < wb) && !along.judge.notes.some(n => !n.result && n.midi === m && Math.abs(n.beat - beat) < wb)) { pass++; beat -= r.endBeat - r.startBeat; }
+    while (pass > along.pass) rollPass();
+    const res = along.judge.press(m, beat);
+    const bar = barOf(res.note ? res.note.beat : beat), st = along.barStats[bar] || (along.barStats[bar] = { wrong: 0, hits: 0 });
+    if (res.result === 'on') st.hits++; else st.wrong++;
+    if (res.note) judged.set(res.note.beat + ':' + res.note.midi, res.result);
+    flash(m, res.result === 'on' ? 'right' : res.result === 'wrong' ? 'wrong' : 'off');
+    along.last = res;
+    updateScore();
+  }
+  function alongTick() {
+    const c = audioNow(), { beat, pass } = alongBeat(c);
+    while (pass > along.pass) rollPass();
+    along.judge.sweep(beat).forEach(n => { judged.set(n.beat + ':' + n.midi, 'missed'); const st = along.barStats[barOf(n.beat)] || (along.barStats[barOf(n.beat)] = { wrong: 0, hits: 0 }); st.wrong++; });
+    position(Math.max(along.range.startBeat, beat));
+    if (!along.lastScore || c - along.lastScore > 0.25) { along.lastScore = c; updateScore(); }
+  }
+  function alongScoreText() {
+    if (!along) return '';
+    const s = along.judge.summary(), l = along.last;
+    const lastTxt = !l ? '' : l.result === 'on' ? 'On time ✓ · ' : l.result === 'wrong' ? 'Wrong note ' + noteName(l.midi) + ' · ' : (l.result === 'early' ? 'Early ' : 'Late ') + Math.abs(l.ms) + ' ms · ';
+    return lastTxt + 'On time ' + s.on + ' · early ' + s.early + ' · late ' + s.late + ' · missed ' + s.missed + ' · wrong ' + s.wrong;
+  }
+  function alongRecord(complete) {
+    const all = along.passes.concat([along.judge.summary()]);
+    const t = all.reduce((a, x) => { ['on', 'early', 'late', 'missed', 'wrong', 'total', 'played'].forEach(k => { a[k] = (a[k] || 0) + (x[k] || 0); }); return a; }, {});
+    const ms = all.filter(x => x.meanMs != null);
+    return {
+      id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), date: Date.now(), mode: 'along', hand,
+      loop: loopOn && along.range.label ? along.range.label : null, passes: along.passes.length, complete,
+      hits: t.played, wrong: t.total - t.on + t.wrong, accuracy: t.total + t.wrong ? Math.round(t.played / (t.total + t.wrong) * 100) : null,
+      timing: t.played ? Math.round(t.on / t.played * 100) : null, meanMs: ms.length ? Math.round(ms.reduce((a, x) => a + x.meanMs, 0) / ms.length) : null,
+      counts: t, seconds: Math.round((Date.now() - along.started) / 1000), tricky: PR.trickiest(along.barStats).map(x => x.bar)
+    };
+  }
+  /** Leaving a play-along run early: log it if enough was played. */
+  function endAlongSession() {
+    if (!along || along.logged || !song) { along = null; return; }
+    const sm = along.judge.summary();
+    if (along.passes.length || sm.played + sm.wrong + sm.missed >= 5) recordSession(alongRecord(false));
+    along.logged = true; along = null; judged.clear();
+  }
+  function finishAlong() {
+    if (!along || mode !== 'along') return;
+    along.judge.sweep(Infinity).forEach(n => judged.set(n.beat + ':' + n.midi, 'missed'));
+    const rec = alongRecord(true), c = rec.counts;
+    recordSession(rec); along.logged = true;
+    const tricky = PR.trickiest(along.barStats);
+    stop();
+    const body = $('#summaryBody'); body.replaceChildren();
+    const p = (t, cls) => { const e = document.createElement('p'); e.textContent = t; if (cls) e.className = cls; body.append(e); return e; };
+    p('On time: ' + c.on + ' of ' + c.total + ' notes' + (rec.timing != null ? ' (' + rec.timing + '% of the notes you played)' : '') + '.');
+    p('Early ' + c.early + ' · late ' + c.late + ' · missed ' + c.missed + ' · wrong ' + c.wrong + (hand !== 'both' ? ' · ' + hand + ' hand' : '') + ' · ' + targetBpm + ' BPM.');
+    if (rec.meanMs != null) p(rec.meanMs < -30 ? 'You tend to rush: on average ' + (-rec.meanMs) + ' ms early. Try listening to the click and waiting for it.' : rec.meanMs > 30 ? 'You tend to drag: on average ' + rec.meanMs + ' ms late. Try a slower tempo until the notes come easily.' : 'Your timing is well centred on the beat.', 'muted');
+    if (tricky.length) {
+      p('Trickiest bars:');
+      const ul = document.createElement('ul'); ul.className = 'tricky';
+      tricky.forEach(t => {
+        const li = document.createElement('li'), b = document.createElement('button');
+        li.textContent = 'Bar ' + t.bar + ' · ' + t.wrong + ' note' + (t.wrong === 1 ? '' : 's') + ' off ';
+        b.textContent = 'Loop this bar';
+        b.onclick = () => { $('#summaryDlg').close(); $('#loopFrom').value = t.bar; $('#loopTo').value = t.bar; setLoop(true); startAlong(); };
+        li.append(b); ul.append(li);
+      });
+      body.append(ul);
+    } else if (c.on === c.total) p('Every note on time. Well played!');
+    along = null;
+    $('#summaryDlg').showModal();
+  }
+
+  /* v6.3 Recording: what you play (MIDI notes, plus microphone audio) --------------- */
+  function recBeat() {
+    if (!song) return null;
+    if (mode === 'along' && along && playing) return alongBeat(audioNow()).beat;
+    if (playing && window.Tone && Tone.Transport.state === 'started') return Tone.Transport.ticks / Tone.Transport.PPQ;
+    if (mode === 'wait' && waitEvs[waitIdx]) return waitEvs[waitIdx].beat;
+    return null;
+  }
+  function recordNote(m, vel, on) {
+    if (!recording) return;
+    recording.events.push({ t: Math.round(performance.now() - recording.start), midi: m, vel: on ? (vel || 0.75) : 0, on, beat: on ? recBeat() : null });
+  }
+  function startRecording() {
+    if (!song) return;
+    endTakePlay();
+    recording = { start: performance.now(), events: [], timeline: [], chunks: [], mediaRec: null, mime: '', mode, timer: 0 };
+    if (mic && window.MediaRecorder) {
+      try {
+        const mr = new MediaRecorder(mic.stream);
+        mr.ondataavailable = e => { if (e.data && e.data.size && recording) recording.chunks.push(e.data); };
+        mr.start(1000); recording.mediaRec = mr; recording.mime = mr.mimeType || '';
+      } catch (e) { /* MIDI-only take */ }
+    }
+    recording.timer = setInterval(() => { if (!recording) return; const b = recBeat(); if (b != null) recording.timeline.push([Math.round(performance.now() - recording.start) / 1000, b]); }, 100);
+    $('#recBtn').textContent = '■ Stop recording'; $('#recBtn').classList.add('rec');
+    toolStatus('Recording' + (recording.mediaRec ? ' notes and sound' : ' notes') + '… press Stop recording when done.');
+  }
+  async function stopRecording() {
+    const r = recording; if (!r) return;
+    const end = Math.round(performance.now() - r.start);
+    clearInterval(r.timer);
+    held.forEach((c, m) => r.events.push({ t: end, midi: m, vel: 0, on: false, beat: null }));
+    let blob = null;
+    if (r.mediaRec) {
+      await new Promise(res => { r.mediaRec.onstop = res; try { r.mediaRec.stop(); } catch (e) { res(); } });
+      if (r.chunks.length) blob = new Blob(r.chunks, { type: r.mime || r.chunks[0].type || 'audio/mp4' });
+    }
+    recording = null;
+    $('#recBtn').textContent = '● Record'; $('#recBtn').classList.remove('rec');
+    const notes = r.events.filter(e => e.on).length;
+    if (!notes && !blob) { toolStatus('Nothing was recorded.'); return; }
+    const take = { id: 'take-' + Date.now().toString(36), songId: song.id, songTitle: song.title, date: Date.now(), duration: end / 1000, events: r.events, timeline: r.timeline, audio: blob, mime: blob ? blob.type : '', mode: r.mode };
+    try {
+      await put('takes', take);
+      const mine = (await allTakes()).filter(t => t.songId === song.id).sort((a, b) => b.date - a.date);
+      for (const old of mine.slice(10)) await del('takes', old.id);
+      toolStatus('Saved a take: ' + fmtSecs(take.duration) + ', ' + notes + ' note' + (notes === 1 ? '' : 's') + (blob ? ' and sound' : '') + '. Open Takes to listen.');
+    } catch (e) { toolStatus('Could not save the take: ' + e.message + '.'); }
+  }
+  const fmtSecs = s => Math.floor(s / 60) + ':' + String(Math.round(s % 60)).padStart(2, '0');
+  function allTakes() {
+    if (!db || !db.objectStoreNames.contains('takes')) return Promise.resolve([]);
+    return new Promise(ok => { try { const r = db.transaction('takes').objectStore('takes').getAll(); r.onsuccess = () => ok(r.result || []); r.onerror = () => ok([]); } catch (e) { ok([]); } });
+  }
+  $('#recBtn').onclick = () => { if (recording) stopRecording(); else startRecording(); };
+  async function renderTakes() {
+    const box = $('#takesList'); box.replaceChildren();
+    const mine = (await allTakes()).filter(t => song && t.songId === song.id).sort((a, b) => b.date - a.date);
+    if (!mine.length) { const p = document.createElement('p'); p.className = 'muted'; p.textContent = 'No takes yet. Press ● Record on the practice screen, play, then Stop recording.'; box.append(p); return; }
+    mine.forEach(t => {
+      const row = document.createElement('div'); row.className = 'take';
+      const info = document.createElement('span'), n = t.events.filter(e => e.on).length;
+      info.textContent = PR.relativeDay(t.date) + ' ' + new Date(t.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ' · ' + fmtSecs(t.duration) + ' · ' + n + ' note' + (n === 1 ? '' : 's') + (t.audio ? ' · with sound' : '') + (t.mode && t.mode !== 'listen' ? ' · ' + (t.mode === 'along' ? 'play along' : 'wait mode') : '');
+      const btn = (label, fn, cls) => { const b = document.createElement('button'); b.textContent = label; b.onclick = fn; if (cls) b.className = cls; row.append(b); return b; };
+      row.append(info);
+      btn('▶ Play', () => playTake(t), 'primary');
+      if (n) btn('⬇ MIDI', () => download(PR.takeToMidi(t.events, t.songTitle), t.songTitle + ' take.mid', 'audio/midi'));
+      if (t.audio) btn('⬇ Sound', () => { const a = document.createElement('a'); a.href = URL.createObjectURL(t.audio); a.download = (t.songTitle + ' take.' + (/mp4|aac|m4a/.test(t.mime) ? 'm4a' : /ogg/.test(t.mime) ? 'ogg' : 'webm')).replace(/[^\w\-. ]+/g, '').replace(/\s+/g, '-'); document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 3000); });
+      btn('Delete', async () => { await del('takes', t.id); renderTakes(); }, 'danger');
+      box.append(row);
+    });
+  }
+  $('#takesBtn').onclick = async () => { await renderTakes(); $('#takesDlg').showModal(); };
+  $('#takesDone').onclick = () => $('#takesDlg').close();
+  async function playTake(t) {
+    stop();
+    try { await audio(); } catch (e) { toolStatus('Audio is unavailable.'); return; }
+    $('#takesDlg').close();
+    takePlay = { timers: [], audio: null, url: null, raf: 0 };
+    const tp = takePlay, start = performance.now() + 120;
+    let clock = () => (performance.now() - start) / 1000;
+    if (t.audio) {
+      tp.url = URL.createObjectURL(t.audio);
+      tp.audio = new Audio(tp.url);
+      tp.audio.onended = () => endTakePlay(true);
+      try { await tp.audio.play(); } catch (e) { toolStatus('Could not play the sound (' + e.message + ').'); endTakePlay(); return; }
+      clock = () => tp.audio.currentTime;
+    }
+    // Light the keys (and, for MIDI-only takes, play the notes) at their recorded times.
+    const ons = t.events.filter(e => e.on), t0 = Tone.now() + 0.12, inst = instrument();
+    ons.forEach(e => {
+      const off = t.events.find(x => !x.on && x.midi === e.midi && x.t >= e.t), dur = Math.max(0.08, ((off ? off.t : e.t + 400) - e.t) / 1000);
+      if (!t.audio) inst.triggerAttackRelease(Tone.Frequency(e.midi, 'midi').toNote(), dur, t0 + e.t / 1000, e.vel || 0.7);
+      tp.timers.push(setTimeout(() => light(e.midi, 1), 120 + e.t), setTimeout(() => light(e.midi, 0), 120 + e.t + dur * 1000));
+    });
+    if (!t.audio) tp.timers.push(setTimeout(() => endTakePlay(true), 120 + t.duration * 1000 + 300));
+    // Follow the score where the take knows the position.
+    const tl = t.timeline && t.timeline.length ? t.timeline : ons.filter(e => e.beat != null).map(e => [e.t / 1000, e.beat]);
+    const follow = () => {
+      if (takePlay !== tp) return;
+      const now = clock();
+      let b = null; for (const [ts, bt] of tl) { if (ts <= now) b = bt; else break; }
+      if (b != null) position(b);
+      tp.raf = requestAnimationFrame(follow);
+    };
+    if (tl.length) follow();
+    toolStatus('Playing your take from ' + PR.relativeDay(t.date).toLowerCase() + '… press Stop to end.');
+  }
+  function endTakePlay(finished) {
+    const tp = takePlay; if (!tp) return;
+    takePlay = null;
+    tp.timers.forEach(clearTimeout); cancelAnimationFrame(tp.raf);
+    if (tp.audio) { tp.audio.pause(); tp.audio.onended = null; }
+    if (tp.url) URL.revokeObjectURL(tp.url);
+    if (window.Tone) releaseAllSound();
+    document.querySelectorAll('#piano .key.on').forEach(k => k.classList.remove('on'));
+    toolStatus(finished ? 'Take finished.' : '');
+  }
 
   /* Sheet music view (Verovio) with simple-view fallback -------------------- */
   let viewPref = localStorage.getItem('pc-view') || 'sheet';
@@ -734,7 +1113,46 @@
       }
     }
   }
+  /* v6.3 Falling notes: notes fall onto the keys they belong to */
+  function setFalling(on) {
+    fallingOn = on;
+    localStorage.setItem('pc-falling', on ? '1' : '0');
+    $('main.practice').classList.toggle('falling', on);
+    $('#fallToggle').classList.toggle('primary', on); $('#fallToggle').setAttribute('aria-pressed', on ? 'true' : 'false');
+    requestAnimationFrame(() => { if (song) position(lastPos); });
+  }
+  $('#fallToggle').onclick = () => setFalling(!fallingOn);
+  $('.pwrap').addEventListener('scroll', () => { if (fallingOn && song) drawRoad(lastPos); }, { passive: true });
+  const FALL_COLOURS = { on: '#22c55e', early: '#f59e0b', late: '#f59e0b', missed: '#7f1d1d' };
+  function drawFalling(beat) {
+    const [x, w, h] = ctx('#road', '#08121f');
+    if (!song) return;
+    const cv = $('#road').getBoundingClientRect(), keys = {};
+    document.querySelectorAll('#piano .key').forEach(k => { const r = k.getBoundingClientRect(); keys[k.dataset.m] = [r.left - cv.left, r.width, k.classList.contains('black')]; });
+    const span = Math.max(4, beatsPerMeasure() * 2), ppb = (h - 8) / span, base = h - 3;
+    x.font = '11px system-ui';
+    segs.forEach(sg => {
+      const y = base - (sg.play - beat) * ppb;
+      if (y < 0 || y > h) return;
+      x.fillStyle = '#1b3350'; x.fillRect(0, y, w, 1);
+      x.fillStyle = '#5b7a99'; x.fillText(sg.number, 4, y - 3);
+    });
+    for (const black of [false, true]) for (const n of song.notes) {
+      const k = keys[n.midi];
+      if (!k || k[2] !== black) continue;
+      const yb = base - (n.startBeat - beat) * ppb, yt = yb - Math.max(5, n.durationBeats * ppb - 2);
+      if (yb < 0 || yt > h) continue;
+      const mine = hand === 'both' || PR.inHand(n, hand), res = judged.get(n.startBeat + ':' + n.midi);
+      x.fillStyle = FALL_COLOURS[res] || (!mine ? '#334155' : n.hand === 'left' ? '#a78bfa' : '#38bdf8');
+      const rx = k[0] + 1.5, rw = Math.max(3, k[1] - 3), rh = yb - yt;
+      x.beginPath();
+      if (x.roundRect) x.roundRect(rx, yt, rw, rh, 4); else x.rect(rx, yt, rw, rh);
+      x.fill();
+    }
+    x.fillStyle = 'rgba(56,189,248,.75)'; x.fillRect(0, base - 1, w, 2);
+  }
   function drawRoad(beat) {
+    if (fallingOn) return drawFalling(beat);
     const [x, w, h] = ctx('#road', '#0b1a2d');
     if (song) for (const n of song.notes) {
       const r = n.startBeat - beat;
@@ -957,12 +1375,13 @@
   if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol)) {
     window.addEventListener('load', () => { navigator.serviceWorker.register('sw.js').catch(err => console.warn('Service worker not registered', err)); });
   }
-  window.addEventListener('pagehide', () => endWaitSession());
+  window.addEventListener('pagehide', () => { endWaitSession(); endAlongSession(); });
 
   window.PCApp = {
     nav, openSong, saveSong: s => { s.updatedAt = Date.now(); return put('songs', s); }, download, audio, instrument, importMusicXML,
     _render: render, _put: put, _position: position, _history: history,
-    _state: () => ({ samplerState, soundPref, sheetReady, segs: segs.length, hand, loopOn, loopRange, pass, waitIdx, waitEvs: waitEvs.length, waitPasses, playing })
+    _state: () => ({ samplerState, soundPref, sheetReady, segs: segs.length, hand, loopOn, loopRange, pass, waitIdx, waitEvs: waitEvs.length, waitPasses, playing, mode, mic: !!mic, along: along ? { pass: along.pass, summary: along.judge.summary(), t0: along.t0, spb: along.spb } : null, recording: !!recording, fallingOn }),
+    _alongBeat: c => along ? alongBeat(c) : null, _audioNow: audioNow
   };
   window.addEventListener('load', () => {
     const missing = missingOmr();
