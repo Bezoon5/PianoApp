@@ -191,8 +191,18 @@ test('a waking server is retried; real errors are not', async () => {
 
     calls = 0;
     global.fetch = async () => { calls++; return new Response(JSON.stringify({ error: 'missing or wrong API key' }), { status: 401 }); };
-    await assert.rejects(H.health('srv.example', '', { retryMs: 1 }), /API key/);
+    await assert.rejects(H.health('srv.example', '', { retryMs: 1 }), /locked with a key, and this device does not have it yet/);
     assert.equal(calls, 1, 'server answers are not retried');
+    await assert.rejects(H.health('srv.example', 'oops', { retryMs: 1 }), /key on this device was not accepted/);
+
+    // checkKey: 401 means wrong key; any other server answer means the key got past the lock.
+    let sent = null;
+    global.fetch = async (u, init) => { sent = init.headers['X-API-Key']; return new Response(JSON.stringify({ error: sent === 'good' ? 'send the page' : 'missing or wrong API key' }), { status: sent === 'good' ? 400 : 401 }); };
+    assert.equal(await H.checkKey('srv.example', 'good'), true);
+    assert.equal(await H.checkKey('srv.example', 'bad'), false);
+    assert.equal(sent, 'bad');
+    global.fetch = async () => { throw new TypeError('Load failed'); };
+    await assert.rejects(H.checkKey('srv.example', 'good'), /could not reach/);
   } finally { global.fetch = realFetch; }
 });
 
@@ -233,4 +243,13 @@ test('scores without positions get no photo boxes', () => {
   const s = H.toScore([{ xml: fs.readFileSync(FIX + 'homr-happy-birthday.musicxml', 'utf8'), pageIndex: 0 }], {});
   assert.ok(!s.pages[0].photo);
   assert.ok(s.measures.every(m => !m.photoBox));
+});
+
+test('set-up link: the key is read from #key=… and nothing else', () => {
+  assert.equal(H.keyFromHash('#key=abc123'), 'abc123');
+  assert.equal(H.keyFromHash('#key=a%2Bb%20'), 'a+b');
+  assert.equal(H.keyFromHash('#key=abc&x=1'), 'abc');
+  assert.equal(H.keyFromHash('#library'), '');
+  assert.equal(H.keyFromHash(''), '');
+  assert.equal(H.keyFromHash('#key=%E0%A4%A'), '');
 });

@@ -28,6 +28,13 @@
   // Built-in recognition server (server/, deployed on Google Cloud Run). Settings can override it;
   // tests set window.PC_DEFAULT_HOMR_URL = '' so they never call the real server.
   const DEFAULT_HOMR_URL = typeof window.PC_DEFAULT_HOMR_URL === 'string' ? window.PC_DEFAULT_HOMR_URL : 'https://piano-recogniser-4nnhn44cva-ew.a.run.app';
+  // Set-up link (…/#key=abc): save the key on this device, then take it out of the address bar.
+  const linkKey = H ? H.keyFromHash(location.hash) : '';
+  if (linkKey) {
+    store.set('pc-homr-key', linkKey);
+    try { history.replaceState(null, '', location.pathname + location.search); } catch (e) { /* keep going */ }
+    window.PC_KEY_SAVED = true;
+  }
   function homrConfig() { return { url: H ? H.normaliseUrl(store.get('pc-homr-url') || DEFAULT_HOMR_URL) : '', key: store.get('pc-homr-key') }; }
   /** 'homr' when a server is configured (unless the user picked the device), else 'device'. */
   function engine() {
@@ -402,8 +409,10 @@
     const ticking = (label) => { const t0 = Date.now(); clearInterval(timer); say(label); timer = setInterval(() => say(label + ' ' + Math.round((Date.now() - t0) / 1000) + ' s'), 1000); };
     try {
       ticking('Connecting to the recognition server (a sleeping free server can take a minute or two to wake up)…');
-      try { await H.health(cfg.url, cfg.key, { signal: ctl.signal, onRetry: () => ticking('Waking up the recognition server…') }); }
+      let h;
+      try { h = await H.health(cfg.url, cfg.key, { signal: ctl.signal, onRetry: () => ticking('Waking up the recognition server…') }); }
       catch (e) { if (ctl.signal.aborted) return; clearInterval(timer); return fallBack('AI recognition is unavailable (' + e.message + ').'); }
+      if (h.needsKey && !cfg.key) { clearInterval(timer); return fallBack('AI recognition is unavailable (the recognition server is locked with a key, and this device does not have it yet: add it in Settings → Photo recognition → Key).'); }
       for (let i = 0; i < state.pages.length; i++) {
         if (ctl.signal.aborted) return;
         const p = state.pages[i];
@@ -414,13 +423,14 @@
           results.push({ xml: r.xml, pageIndex: i, seconds: r.seconds });
         } catch (e) {
           if (ctl.signal.aborted) return;
-          failures.push({ page: i, message: e.message, network: !e.status });
-          if (!e.status) break; // the server went away; no point trying more pages
+          failures.push({ page: i, message: e.message, network: !e.status, keyProblem: !!e.keyProblem });
+          if (!e.status || e.keyProblem) break; // the server went away or refuses this device; no point trying more pages
         }
       }
     } finally { clearInterval(timer); if (state.homrAbort === ctl) state.homrAbort = null; }
     if (ctl.signal.aborted) return;
     $('omrNext2').disabled = false;
+    if (!results.length && failures[0] && failures[0].keyProblem) return fallBack('AI recognition is unavailable (' + failures[0].message + ').');
     if (!results.length) return fallBack('AI recognition could not read ' + (state.pages.length > 1 ? 'these pages' : 'this page') + ' (' + (failures[0] ? failures[0].message : 'no result') + ').');
     state.score = H.toScore(results, { title: state.meta.title, composer: state.meta.composer, tempo: state.meta.tempo, tempoEdited: !!state.meta.tempoEdited, spec });
     state.pageMap = state.score.pageMap;
@@ -942,6 +952,7 @@
       $('omrNext2').disabled = !canRecognise();
     });
     bindSettings();
+    if (window.PC_KEY_SAVED) toast('Recognition key saved on this device. Photos will now be read by your AI server.');
     $('omrAuto').onclick = () => { const p = state.pages[state.current]; if (!p) return; const a = G.autoCorners(p.gray, p.w, p.h); p.corners = a.corners; p.autoDetected = a.detected; p.shadow = !!a.shadow; p.layout = null; renderPages(); };
     $('omrFull').onclick = () => { const p = state.pages[state.current]; if (!p) return; p.corners = [[0, 0], [p.w - 1, 0], [p.w - 1, p.h - 1], [0, p.h - 1]]; p.layout = null; drawCrop(); };
     $('omrRotL').onclick = () => rotatePage(false);
@@ -971,6 +982,12 @@
     window.addEventListener('resize', () => { if (state.step === 1) drawCrop(); if (state.step === 2) drawLayout(); if (state.step === 3 && state.score) renderPanes(); });
   }
 
+  function toast(text, ms) {
+    const t = $('toast'); if (!t) return;
+    t.textContent = text; t.hidden = false;
+    clearTimeout(toast.timer); toast.timer = setTimeout(() => { t.hidden = true; }, ms || 6000);
+  }
+
   /* Settings → Photo recognition */
   function bindSettings() {
     const url = $('homrUrl'), key = $('homrKey'), st = $('homrStatus');
@@ -991,6 +1008,17 @@
       if (n) store.set('pc-omr-engine', 'homr');
       describe(); if (state.step === 2) { renderEngines(); $('omrNext2').disabled = !canRecognise(); } };
     key.onchange = () => { store.set('pc-homr-key', key.value.trim()); };
+    // A link that sets the key on another device (a phone): the key stays after the #, which browsers never send to the website.
+    const linkBtn = $('homrKeyLink');
+    if (linkBtn) linkBtn.onclick = async () => {
+      key.onchange();
+      const k = store.get('pc-homr-key');
+      if (!k) { st.textContent = 'Enter the key first, then copy the link.'; return; }
+      const link = location.origin + location.pathname + '#key=' + encodeURIComponent(k);
+      const note = ' Open it once on your phone or tablet to save the key there. Anyone with this link can use your recognition server, so only send it to yourself.';
+      try { await navigator.clipboard.writeText(link); st.textContent = '✓ Set-up link copied.' + note; }
+      catch (e) { st.textContent = 'Copy this set-up link: ' + link + '.' + note; }
+    };
     $('homrTest').onclick = async () => {
       url.onchange(); key.onchange();
       const cfg = homrConfig();
@@ -998,12 +1026,16 @@
       $('homrTest').disabled = true; st.textContent = 'Contacting ' + cfg.url + '… (a sleeping server can take a minute or two)';
       try {
         const h = await H.health(cfg.url, cfg.key, { onRetry: n => { st.textContent = 'Waking up the server… (try ' + (n + 1) + ')'; } });
-        st.textContent = '✓ Connected: homr ' + h.version + (h.busy ? ' · busy with ' + h.busy + ' page(s)' : ' · ready') + (h.needsKey && !cfg.key ? ' · this server needs a key' : '') + '.';
+        const base = 'homr ' + h.version + (h.busy ? ' · busy with ' + h.busy + ' page(s)' : ' · ready');
+        if (!h.needsKey) st.textContent = '✓ Connected: ' + base + '.';
+        else if (!cfg.key) st.textContent = '✖ The server answered (' + base + '), but it is locked with a key: enter the key above, then test again.';
+        else if (await H.checkKey(cfg.url, cfg.key)) st.textContent = '✓ Connected: ' + base + ' · key accepted.';
+        else st.textContent = '✖ The server answered (' + base + '), but it did not accept this key. Check it for typos and test again.';
       } catch (e) { st.textContent = '✖ ' + e.message.charAt(0).toUpperCase() + e.message.slice(1) + '.'; }
       finally { $('homrTest').disabled = false; }
     };
   }
 
-  window.PCOMR = { open, reset, state, _analyse: analyse, _engine: engine };
+  window.PCOMR = { open, reset, state, toast, _analyse: analyse, _engine: engine };
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
 })();

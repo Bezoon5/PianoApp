@@ -1,5 +1,12 @@
 # Changelog
 
+## 6.3.1: lock the recognition server to your devices
+New
+- **Recognition key:** `server/lock-server.sh` locks the AI recognition server with a key in one Cloud Shell line and prints a set-up link. Opening the link on a device saves the key there and removes it from the address bar.
+- **Settings → Photo recognition:** Test connection now says whether the server is locked and whether this device's key is accepted. **Copy set-up link for another device** puts the link on the clipboard. The key field is hidden like a password.
+Other
+- When the server is locked and this device has no key (or a wrong one), scanning says so plainly and uses the on-device recogniser, instead of showing a generic error.
+
 ## 6.3.0: microphone, play along, recording, falling notes
 New
 - **🎤 Mic: listen to your piano through the microphone.** Brings Wait mode and wrong-note checking to iPhone and iPad, where MIDI keyboards can't connect to web apps. Because the app knows which notes come next, it checks for exactly those notes (single notes and simple chords), flags clearly wrong notes, ignores the app's own accompaniment, and stays silent for your notes because your piano makes the sound. A short calibration measures the room's background noise first.

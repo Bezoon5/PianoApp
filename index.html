@@ -169,8 +169,8 @@
   <h3>Photo recognition</h3>
   <p class="muted">Photos are read by the AI recognition server built into the app. To use your own server instead, enter its address (setup steps: <code>server/README.md</code>).</p>
   <label>Server address<input id="homrUrl" placeholder="https://piano-recogniser-….run.app" inputmode="url" autocomplete="off" autocapitalize="off" spellcheck="false"></label>
-  <label>Key (only if your server uses one)<input id="homrKey" autocomplete="off" autocapitalize="off" spellcheck="false"></label>
-  <div class="actions left"><button id="homrTest">Test connection</button></div>
+  <label>Key (if the server is locked)<input id="homrKey" type="password" autocomplete="off" autocapitalize="off" spellcheck="false"></label>
+  <div class="actions left"><button id="homrTest">Test connection</button><button id="homrKeyLink">Copy set-up link for another device</button></div>
   <p id="homrStatus" class="muted">Not set: photos use the basic on-device recogniser.</p>
   <h3>MIDI keyboard</h3>
   <p id="midiStatus" class="muted">Checking for MIDI keyboards…</p>
@@ -209,5 +209,6 @@
 <script src="music/listen.js"></script>
 <script src="app.js"></script>
 <script src="omr/workflow.js"></script>
+<div id="toast" class="toast" role="status" hidden></div>
 </body>
 </html>

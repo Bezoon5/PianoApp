@@ -3,6 +3,8 @@
  *
  *   normaliseUrl(text)                   -> 'https://host' (no trailing slash) or ''
  *   health(url, key, opts)               -> server status JSON (throws friendly errors)
+ *   checkKey(url, key, opts)             -> true if the server accepts the key
+ *   keyFromHash(location.hash)           -> key from a set-up link (#key=…) or ''
  *   recognisePage(blob, opts)            -> { xml, seconds } for one page image
  *   parse(xmlText)                       -> parts, measures and events read from homr's MusicXML
  *   choosePart(parsed, spec)             -> the part to review (piano by default)
@@ -54,8 +56,11 @@
       let body = null;
       if (!res.ok) {
         try { body = await res.json(); } catch (e) { /* not JSON */ }
-        const msg = body && body.error ? body.error : 'server error ' + res.status;
-        const e = new Error(msg); e.status = res.status; throw e;
+        const sentKey = !!(init && init.headers && init.headers['X-API-Key']);
+        const msg = res.status === 401
+          ? 'the recognition server is locked with a key, and ' + (sentKey ? 'the key on this device was not accepted' : 'this device does not have it yet') + ' (Settings → Photo recognition → Key)'
+          : body && body.error ? body.error : 'server error ' + res.status;
+        const e = new Error(msg); e.status = res.status; if (res.status === 401) e.keyProblem = true; throw e;
       }
       return res;
     } catch (err) {
@@ -91,6 +96,24 @@
     const j = await res.json();
     if (!j || j.engine !== 'homr') throw new Error('that address answered, but it is not a Piano Companion recognition server');
     return j;
+  }
+
+  /**
+   * Is this key accepted? Sends an empty upload: the server checks the key before
+   * anything else, so a wrong key gets 401 and a right one gets 400 (no image).
+   */
+  async function checkKey(url, key, opts) {
+    opts = opts || {};
+    url = normaliseUrl(url);
+    try { await call(url, '/recognise', { method: 'POST', body: new FormData(), headers: key ? { 'X-API-Key': key } : {} }, opts.timeoutMs || 60000, opts.signal); return true; }
+    catch (e) { if (e.keyProblem) return false; if (e.status) return true; throw e; }
+  }
+
+  /** Read a recognition key from a set-up link (…/#key=abc). Returns the key or ''. */
+  function keyFromHash(hash) {
+    const m = /^#key=([^&]+)/.exec(hash || '');
+    if (!m) return '';
+    try { return decodeURIComponent(m[1]).trim(); } catch (e) { return ''; }
   }
 
   /** Send one page image; resolves with homr's MusicXML. */
@@ -420,5 +443,5 @@
     score.pages[pageNo].photo = true;
   }
 
-  return { normaliseUrl, health, recognisePage, parse, choosePart, toScore, pieces };
+  return { normaliseUrl, health, checkKey, keyFromHash, recognisePage, parse, choosePart, toScore, pieces };
 });

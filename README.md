@@ -17,6 +17,8 @@ A piano practice app for iPhone, iPad and desktop browsers. Import music (includ
 ### AI recognition for photos
 Scanned pages are sent to the app's recognition server (in [`server/`](server/README.md), running [homr](https://github.com/liebharc/homr) on Google Cloud Run). It is built into the app, so there is nothing to set up. The server sleeps when unused, so the first page after a break takes a little longer while it wakes up. If it can't be reached, the app says so and uses the on-device recogniser instead. **Settings → Photo recognition** can point the app at a different server; clearing the box returns to the built-in one. In the Layout step you can also choose **On this device**.
 
+**Keeping it to yourself.** The website is public (GitHub Pages can't be made private on a free plan), but your music and progress stay on your own devices, so a visitor only sees an empty app. The recognition server can be locked with a key so that only your devices can use it: one line in Cloud Shell, then open the set-up link it prints on each device (see [server/README.md](server/README.md#lock-it-so-only-your-devices-can-use-it)).
+
 **Reviewing a scan.** Bars that don't add up are shown in red, ones to check in amber, both on the recognised score and on your photo. Tap a note on either to select and fix it; **Next issue** jumps to the next problem bar.
 
 Tips for good photos: lay the page flat, fill the frame, use even light, and use **Camera app (sharper)** for a full-resolution photo.
