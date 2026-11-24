@@ -18,7 +18,25 @@ MusicXML back, which then goes through the app's review screen as before.
 The app is a static website, so the recogniser has to run somewhere else. Pick one
 of the options below. All of them use the `Dockerfile` in this folder.
 
-## Option A: Hugging Face Spaces (free, easiest)
+## Option A0: automatic deploy from GitHub (recommended)
+
+The repository has a workflow (`.github/workflows/deploy-server.yml`) that creates
+the Hugging Face Space and keeps it up to date whenever `server/` changes.
+
+1. Create a free account at <https://huggingface.co>.
+2. On Hugging Face: **Settings → Access Tokens → Create new token**, choose
+   **Write**, name it `github-deploy`, and copy the token.
+3. On GitHub: repository **Settings → Secrets and variables → Actions →
+   New repository secret**. Name: `HF_TOKEN`. Paste the token. Save.
+4. On GitHub: **Actions → Deploy recognition server → Run workflow**.
+5. Open the finished run: its summary shows the **server address**. Wait 5–10
+   minutes for the first build on Hugging Face, then use the address in the app
+   (Settings → Photo recognition → Test connection).
+
+Never paste the token anywhere else (chat, code, issues). To use a different Space
+name, add a repository *variable* `HF_SPACE_NAME`.
+
+## Option A: Hugging Face Spaces by hand (free)
 
 1. Create a free account at <https://huggingface.co>.
 2. **New → Space**. Name it e.g. `piano-recogniser`, choose **Docker** as the SDK

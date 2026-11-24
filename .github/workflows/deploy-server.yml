@@ -1,0 +1,52 @@
+name: Deploy recognition server
+# Creates (first time) and updates the Hugging Face Space that runs server/.
+# Needs one repository secret: HF_TOKEN (a Hugging Face access token with "Write" permission).
+# Optional repository variable HF_SPACE_NAME (default: piano-recogniser).
+on:
+  push:
+    branches: [main]
+    paths: ['server/**', '.github/workflows/deploy-server.yml']
+  workflow_dispatch: {}
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check for the Hugging Face token
+        id: check
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          if [ -z "$HF_TOKEN" ]; then
+            echo "::notice::The HF_TOKEN secret is not set yet, so nothing was deployed. See server/README.md."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
+      - if: steps.check.outputs.skip != 'true'
+        uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - name: Upload server/ to the Space
+        if: steps.check.outputs.skip != 'true'
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          SPACE_NAME: ${{ vars.HF_SPACE_NAME || 'piano-recogniser' }}
+        run: |
+          pip install --quiet "huggingface_hub>=0.24"
+          python - <<'EOF'
+          import os, re
+          from huggingface_hub import HfApi
+          api = HfApi(token=os.environ["HF_TOKEN"])
+          user = api.whoami()["name"]
+          space = os.environ["SPACE_NAME"]
+          repo = f"{user}/{space}"
+          api.create_repo(repo, repo_type="space", space_sdk="docker", exist_ok=True)
+          api.upload_folder(folder_path="server", repo_id=repo, repo_type="space",
+                            commit_message="Deploy from GitHub " + os.environ.get("GITHUB_SHA", "")[:7])
+          host = "https://" + re.sub(r"[^a-z0-9-]", "-", f"{user}-{space}".lower()) + ".hf.space"
+          print(f"::notice::Deployed. Space: https://huggingface.co/spaces/{repo} | Server address for the app: {host}")
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as f:
+              f.write(f"### Recognition server deployed\n\n"
+                      f"- Space: https://huggingface.co/spaces/{repo}\n"
+                      f"- Server address for the app: **{host}**\n\n"
+                      f"The first build on Hugging Face takes 5-10 minutes. "
+                      f"When {host}/health shows `\"ok\": true`, paste the address into Settings > Photo recognition.\n")
+          EOF
