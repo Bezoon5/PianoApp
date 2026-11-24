@@ -37,7 +37,7 @@
 
   function friendly(err, url) {
     if (err && err.name === 'AbortError') return new Error(err.timedOut ? 'the recognition server did not answer in time' : 'recognition was cancelled');
-    if (err instanceof TypeError) return new Error('could not reach the recognition server at ' + url + '; check the address, your connection, and that the server allows this website');
+    if (err instanceof TypeError) { const e = new Error('could not reach the recognition server at ' + url + '; check the address, your connection, and that the server allows this website'); e.network = true; return e; }
     return err;
   }
 
@@ -61,12 +61,30 @@
     } finally { clearTimeout(timer); if (signal) signal.removeEventListener('abort', onAbort); }
   }
 
-  /** Server status. A sleeping free server can take a minute or two to wake. */
+  const pause = (ms, signal) => new Promise((resolve, reject) => {
+    const t = setTimeout(resolve, ms);
+    if (signal) signal.addEventListener('abort', () => { clearTimeout(t); const e = new Error('recognition was cancelled'); e.name = 'AbortError'; reject(e); }, { once: true });
+  });
+
+  /**
+   * Server status. A server that scaled to zero takes a while to start, and some
+   * browsers (Safari on iPhone) give up on the first request sooner than others,
+   * so connection failures are retried a few times before reporting an error.
+   */
   async function health(url, key, opts) {
     opts = opts || {};
     url = normaliseUrl(url);
     if (!url) throw new Error('no recognition server address is set (Settings → Photo recognition)');
-    const res = await call(url, '/health', { headers: key ? { 'X-API-Key': key } : {} }, opts.timeoutMs || 150000, opts.signal);
+    const tries = opts.retries != null ? opts.retries + 1 : 4, gap = opts.retryMs != null ? opts.retryMs : 5000;
+    let res;
+    for (let attempt = 1; ; attempt++) {
+      try { res = await call(url, '/health', { headers: key ? { 'X-API-Key': key } : {} }, opts.timeoutMs || 150000, opts.signal); break; }
+      catch (e) {
+        if (!e.network || attempt >= tries || (opts.signal && opts.signal.aborted)) throw e;
+        if (opts.onRetry) opts.onRetry(attempt);
+        await pause(gap, opts.signal);
+      }
+    }
     const j = await res.json();
     if (!j || j.engine !== 'homr') throw new Error('that address answered, but it is not a Piano Companion recognition server');
     return j;

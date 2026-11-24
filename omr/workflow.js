@@ -402,7 +402,7 @@
     const ticking = (label) => { const t0 = Date.now(); clearInterval(timer); say(label); timer = setInterval(() => say(label + ' ' + Math.round((Date.now() - t0) / 1000) + ' s'), 1000); };
     try {
       ticking('Connecting to the recognition server (a sleeping free server can take a minute or two to wake up)…');
-      try { await H.health(cfg.url, cfg.key, { signal: ctl.signal }); }
+      try { await H.health(cfg.url, cfg.key, { signal: ctl.signal, onRetry: () => ticking('Waking up the recognition server…') }); }
       catch (e) { if (ctl.signal.aborted) return; clearInterval(timer); return fallBack('AI recognition is unavailable (' + e.message + ').'); }
       for (let i = 0; i < state.pages.length; i++) {
         if (ctl.signal.aborted) return;
@@ -957,7 +957,7 @@
       if (!cfg.url) { st.textContent = 'Enter the server address first.'; return; }
       $('homrTest').disabled = true; st.textContent = 'Contacting ' + cfg.url + '… (a sleeping server can take a minute or two)';
       try {
-        const h = await H.health(cfg.url, cfg.key);
+        const h = await H.health(cfg.url, cfg.key, { onRetry: n => { st.textContent = 'Waking up the server… (try ' + (n + 1) + ')'; } });
         st.textContent = '✓ Connected: homr ' + h.version + (h.busy ? ' · busy with ' + h.busy + ' page(s)' : ' · ready') + (h.needsKey && !cfg.key ? ' · this server needs a key' : '') + '.';
       } catch (e) { st.textContent = '✖ ' + e.message.charAt(0).toUpperCase() + e.message.slice(1) + '.'; }
       finally { $('homrTest').disabled = false; }
