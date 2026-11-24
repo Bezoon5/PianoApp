@@ -40,8 +40,10 @@ normally stays within Google's monthly free allowance.
    If Cloud Shell asks to **Authorize**, allow it. The first deploy takes about
    5–10 minutes and ends by printing the **server address**
    (`https://piano-recogniser-….run.app`).
-6. In the app: **Settings → Photo recognition**, paste the address, press
-   **Test connection**.
+6. The Piano Companion app has this server's address built in (`DEFAULT_HOMR_URL`
+   in `omr/workflow.js`). If you deploy your own copy under a different address,
+   either change that line or paste the address into **Settings → Photo recognition**
+   and press **Test connection**.
 
 To update the server after `server/` changes, open Cloud Shell and paste the
 same line again.
