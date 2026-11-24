@@ -8,9 +8,12 @@
  *   choosePart(parsed, spec)             -> the part to review (piano by default)
  *   toScore(pages, meta)                 -> editable review score (same shape as OMRModel.buildScore)
  *
- * homr returns notes and rhythms but no positions on the photo, so the review
- * score gets a clean synthetic layout. Systems follow homr's line breaks when
- * it reports them, so the recognised view lines up with the photo row by row.
+ * The review score gets a clean synthetic layout. Systems follow homr's line
+ * breaks when it reports them, so the recognised view lines up with the photo
+ * row by row. homr also marks where each note is on the photo
+ * (<!-- imgpos: x, y --> inside <note>, in pixels of the image sent); those
+ * become note.photo / event.photo and a box per measure (measure.photoBox),
+ * so the review can highlight bars on the photo and accept taps on it.
  */
 (function (root, factory) {
   if (typeof module === 'object' && module.exports) module.exports = factory(require('../music/xml.js'), require('./model.js'));
@@ -109,6 +112,8 @@
 
   /** Read homr's MusicXML into parts -> measures -> staves -> voices -> events (times in beats). */
   function parse(text) {
+    // The XML reader drops comments, so turn homr's position comments into elements first.
+    text = String(text).replace(/<!--\s*imgpos:\s*(-?[\d.]+)\s*,\s*(-?[\d.]+)\s*-->/g, '<imgpos x="$1" y="$2"/>');
     const r = X.root(X.parse(text));
     if (!r || r.name !== 'score-partwise') throw new Error('not a partwise MusicXML score');
     const names = {};
@@ -148,7 +153,8 @@
             const chord = !!X.child(c, 'chord'), restEl = X.child(c, 'rest');
             const dur = num(X.childText(c, 'duration'), 0) / divisions;
             const staff = +(X.childText(c, 'staff') || 1), voice = +(X.childText(c, 'voice') || 1);
-            const pitchEl = X.child(c, 'pitch');
+            const pitchEl = X.child(c, 'pitch'), ip = X.child(c, 'imgpos');
+            const photo = ip && isFinite(+ip.attrs.x) && isFinite(+ip.attrs.y) ? { x: +ip.attrs.x, y: +ip.attrs.y } : null;
             let pitch = null;
             if (pitchEl && !restEl) {
               const ties = X.children(c, 'tie').map(t => t.attrs.type).concat(X.findAll(c, 'tied').map(t => t.attrs.type));
@@ -156,7 +162,7 @@
               pitch = {
                 diatonic: num(X.childText(pitchEl, 'octave'), 4) * 7 + (LETTER[step] != null ? LETTER[step] : 0),
                 alter: Math.round(num(X.childText(pitchEl, 'alter'), 0)),
-                shown: X.childText(c, 'accidental') !== '', tieStart: ties.indexOf('start') >= 0, tieStop: ties.indexOf('stop') >= 0
+                shown: X.childText(c, 'accidental') !== '', tieStart: ties.indexOf('start') >= 0, tieStop: ties.indexOf('stop') >= 0, photo
               };
               notes.count++;
             }
@@ -169,7 +175,7 @@
               staff, voice, start, dur, rest: !pitch, measureRest: !!(restEl && restEl.attrs.measure === 'yes'),
               type: typeText, base: TYPE_MAP[typeText] || null, odd: !!typeText && !TYPE_MAP[typeText] || /breve|long|maxima|64th|128th/.test(typeText),
               dots: X.children(c, 'dot').length, tuplet: actual !== normal && actual > 0 && normal > 0 ? { actual, normal } : null,
-              pitches: pitch ? [pitch] : []
+              pitches: pitch ? [pitch] : [], photo
             };
             m.events.push(ev); lastEvent = ev;
             if (!chord) { lastStart = pos; pos += dur; }
@@ -240,11 +246,11 @@
           let made = [];
           if (e.measureRest || (e.rest && !e.base)) {
             let t = e.start;
-            pieces(e.measureRest ? (e.dur > EPS ? e.dur : mLen) : e.dur).forEach(p => { made.push(newEvent('rest', p[1], p[2], t, { voice: v })); t += p[0]; });
+            pieces(e.measureRest ? (e.dur > EPS ? e.dur : mLen) : e.dur).forEach((p, i) => { made.push(newEvent('rest', p[1], p[2], t, { voice: v, photo: i === 0 && e.photo ? e.photo : undefined })); t += p[0]; });
           } else {
             const val = e.base ? [null, e.base, Math.min(2, e.dots)] : bestValue(e.dur);
-            const ev = newEvent(e.rest ? 'rest' : 'note', val[1], val[2], e.start, { voice: v, tuplet: e.tuplet });
-            if (!e.rest) ev.notes = e.pitches.map(p => ({ id: id('n'), diatonic: p.diatonic, alter: p.alter, shown: p.shown, accidental: null, x: 0, y: null, conf: 0.9, tieStart: p.tieStart || undefined, tieStop: p.tieStop || undefined }));
+            const ev = newEvent(e.rest ? 'rest' : 'note', val[1], val[2], e.start, { voice: v, tuplet: e.tuplet, photo: e.photo || undefined });
+            if (!e.rest) ev.notes = e.pitches.map(p => ({ id: id('n'), diatonic: p.diatonic, alter: p.alter, shown: p.shown, accidental: null, x: 0, y: null, conf: 0.9, tieStart: p.tieStart || undefined, tieStop: p.tieStop || undefined, photo: p.photo || undefined }));
             if (two && !e.rest) ev.stemDir = v === 1 ? 'up' : 'down';
             const written = M.duration(ev);
             if (e.odd || !e.base || (e.dur > EPS && Math.abs(written - e.dur) > Math.max(0.02, e.dur * 0.02))) ev.conf = 0.45;
@@ -311,6 +317,7 @@
         return { pm, staves, clefs, mLen, newSystem: pm.newSystem && mi > 0 };
       });
       layoutPage(score, pageMeasures, pageNo, nStaves);
+      photoBoxes(score, pageNo);
       score.pageMap.push(photo);
       warnSet.forEach(message => score.warnings.push({ page: pageNo, photoPage: photo, code: 'NOTE', message }));
     });
@@ -377,6 +384,40 @@
       y += sysH + IL * 11;
     });
     score.pages.push({ index: pageNo, width: PAGE_W, height: Math.max(400, y - IL * 4 + MARGIN), interline: IL, skew: 0, synthetic: true });
+  }
+
+  /**
+   * A box on the photo for each measure, from homr's note positions: bars in a
+   * row share the row's height, and neighbouring bars meet halfway between their
+   * outermost notes. A new row starts where the notes jump back to the left.
+   */
+  function photoBoxes(score, pageNo) {
+    const ms = score.measures.filter(m => m.page === pageNo);
+    const pts = ms.map(m => {
+      const p = [];
+      m.staves.forEach(st => st.events.forEach(e => { if (e.photo) p.push(e.photo); e.notes.forEach(n => { if (n.photo) p.push(n.photo); }); }));
+      return p;
+    });
+    const gaps = [];
+    pts.forEach(p => { const xs = [...new Set(p.map(q => Math.round(q.x)))].sort((a, b) => a - b); for (let i = 1; i < xs.length; i++) gaps.push(xs[i] - xs[i - 1]); });
+    gaps.sort((a, b) => a - b);
+    const pad = Math.max(6, Math.min(40, (gaps.length ? gaps[Math.floor(gaps.length / 2)] : 20) * 0.6));
+    const info = ms.map((m, i) => pts[i].length ? { m, x0: Math.min(...pts[i].map(q => q.x)), x1: Math.max(...pts[i].map(q => q.x)), y0: Math.min(...pts[i].map(q => q.y)), y1: Math.max(...pts[i].map(q => q.y)) } : null).filter(Boolean);
+    if (!info.length) return;
+    const rows = [];
+    info.forEach((it, i) => { if (!i || it.x0 < info[i - 1].x0 - pad) rows.push([]); rows[rows.length - 1].push(it); });
+    rows.forEach(row => {
+      const y0 = Math.min(...row.map(r => r.y0)) - pad * 2.2, y1 = Math.max(...row.map(r => r.y1)) + pad * 2.2;
+      row.forEach((it, i) => {
+        const prev = row[i - 1], next = row[i + 1];
+        it.m.photoBox = {
+          x0: prev ? (prev.x1 + it.x0) / 2 : it.x0 - pad * 2.5,
+          x1: next ? (it.x1 + next.x0) / 2 : it.x1 + pad * 2,
+          y0, y1, pad
+        };
+      });
+    });
+    score.pages[pageNo].photo = true;
   }
 
   return { normaliseUrl, health, recognisePage, parse, choosePart, toScore, pieces };

@@ -195,3 +195,42 @@ test('a waking server is retried; real errors are not', async () => {
     assert.equal(calls, 1, 'server answers are not retried');
   } finally { global.fetch = realFetch; }
 });
+
+test('real homr output: every note right on clean and shadowed photos', () => {
+  const key = notesOf(H.toScore([{ xml: fs.readFileSync(FIX + 'homr-happy-birthday.musicxml', 'utf8'), pageIndex: 0 }], {}));
+  for (const f of ['homr-real-happy.musicxml', 'homr-real-shadow.musicxml']) {
+    const s = H.toScore([{ xml: fs.readFileSync(FIX + f, 'utf8'), pageIndex: 0 }], {});
+    assert.equal(s.key, -1); assert.deepEqual(s.time, [3, 4]); assert.equal(s.measures.length, 9);
+    assert.equal(M.summary(s).invalid, 0, f);
+    const c = compare(notesOf(s), key.map(n => Object.assign({}, n, { durationBeats: n.durationBeats / 0.95 })));
+    assert.equal(c.match, 52, f + ': ' + c.match + '/52 notes exactly right');
+  }
+});
+
+test('homr image positions become note positions and a box per bar on the photo', () => {
+  const s = H.toScore([{ xml: fs.readFileSync(FIX + 'homr-real-happy.musicxml', 'utf8'), pageIndex: 0 }], {});
+  assert.equal(s.pages[0].photo, true);
+  const first = s.measures[0].staves[0].events.find(e => e.type === 'note');
+  assert.deepEqual(first.notes[0].photo, { x: 97, y: 120 }, 'first C4 at homr\'s position');
+  assert.ok(s.measures.every(m => m.photoBox), 'every bar has a box');
+  // the photo (409×446) has three systems of three bars; boxes in a row share their height and touch
+  const rows = [];
+  s.measures.forEach(m => { const r = rows.find(r => Math.abs(r[0].photoBox.y0 - m.photoBox.y0) < 1); if (r) r.push(m); else rows.push([m]); });
+  assert.deepEqual(rows.map(r => r.length), [3, 3, 3]);
+  rows.forEach(r => { for (let i = 1; i < r.length; i++) assert.ok(Math.abs(r[i].photoBox.x0 - r[i - 1].photoBox.x1) < 1e-6); });
+  s.measures.forEach(m => {
+    const b = m.photoBox;
+    assert.ok(b.x0 >= 0 && b.x1 <= 409 && b.y0 >= 0 && b.y1 <= 446 && b.x1 > b.x0 && b.y1 > b.y0, JSON.stringify(b));
+    m.staves.forEach(st => st.events.forEach(e => e.notes.forEach(n => {
+      if (n.photo) assert.ok(n.photo.x >= b.x0 && n.photo.x <= b.x1 && n.photo.y >= b.y0 && n.photo.y <= b.y1, 'note inside its bar box');
+    })));
+  });
+  // positions survive into the saved score but not into MusicXML export
+  assert.doesNotMatch(M.toMusicXML(s), /imgpos/);
+});
+
+test('scores without positions get no photo boxes', () => {
+  const s = H.toScore([{ xml: fs.readFileSync(FIX + 'homr-happy-birthday.musicxml', 'utf8'), pageIndex: 0 }], {});
+  assert.ok(!s.pages[0].photo);
+  assert.ok(s.measures.every(m => !m.photoBox));
+});

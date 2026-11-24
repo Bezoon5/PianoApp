@@ -543,12 +543,27 @@
   function drawOriginal() {
     const cv = $('omrOrig'); if (cv.parentElement.offsetParent === null) return;
     if (state.score.engine === 'homr') {
-      // homr gives notes, not positions on the photo: show the photo as sent.
-      const page = state.pages[state.pageMap[state.reviewPage]], img = page && (page.sentCanvas || page.canvas);
+      // The photo as sent, with homr's note positions: bar boxes coloured by status,
+      // the selected bar outlined and the selected note circled.
+      const img = homrPhoto();
       const W = Math.max(200, cv.parentElement.clientWidth - 6), Ht = img ? img.height * W / img.width : 300, d = window.devicePixelRatio || 1;
       cv.width = Math.round(W * d); cv.height = Math.round(Ht * d); cv.style.width = W + 'px'; cv.style.height = Ht + 'px';
       const c2 = cv.getContext('2d'); c2.setTransform(d, 0, 0, d, 0, 0);
-      if (img) c2.drawImage(img, 0, 0, W, Ht);
+      if (!img) return;
+      c2.drawImage(img, 0, 0, W, Ht);
+      const k2 = W / img.width, sel = selected();
+      c2.setTransform(d * k2, 0, 0, d * k2, 0, 0);
+      pageMeasures().forEach(m => {
+        const b = m.photoBox; if (!b) return;
+        c2.fillStyle = STATUS_FILL[m.status]; c2.fillRect(b.x0, b.y0, b.x1 - b.x0, b.y1 - b.y0);
+        if (m.status === 'invalid' || m.status === 'uncertain') { c2.strokeStyle = STATUS_LINE[m.status]; c2.lineWidth = 2 / k2; c2.strokeRect(b.x0, b.y0, b.x1 - b.x0, b.y1 - b.y0); }
+        if (sel && sel.measure === m) { c2.strokeStyle = '#2563eb'; c2.lineWidth = 3 / k2; c2.strokeRect(b.x0, b.y0, b.x1 - b.x0, b.y1 - b.y0); }
+      });
+      const at = sel && ((sel.note && sel.note.photo) || sel.event.photo);
+      if (at) {
+        const r = (sel.measure.photoBox ? sel.measure.photoBox.pad : 12) * 1.3;
+        c2.strokeStyle = '#2563eb'; c2.lineWidth = 3 / k2; c2.beginPath(); c2.arc(at.x, at.y, r, 0, 7); c2.stroke();
+      }
       return;
     }
     const { ctx, k } = setupCanvas(cv);
@@ -693,9 +708,31 @@
     if (step < -8 || step > 16) return null;
     return { m, st: best.st, k: best.k, diatonic: M.clefBase(best.st.clef) + step };
   }
+  function homrPhoto() { const page = state.pages[state.pageMap[state.reviewPage]]; return page && (page.sentCanvas || page.canvas); }
+  const hasPhotoBoxes = () => !!(state.score && state.score.pages[state.reviewPage] && state.score.pages[state.reviewPage].photo);
+  /** Tap on the photo (AI recognition): nearest note or rest by homr's positions, inside the tapped bar if any. */
+  function photoHit(ev) {
+    const cv = ev.currentTarget, img = homrPhoto(); if (!img) return null;
+    const r = cv.getBoundingClientRect(), k2 = r.width / img.width, x = (ev.clientX - r.left) / k2, y = (ev.clientY - r.top) / k2;
+    const ms = pageMeasures().filter(m => m.photoBox);
+    const inside = ms.filter(m => x >= m.photoBox.x0 && x <= m.photoBox.x1 && y >= m.photoBox.y0 && y <= m.photoBox.y1);
+    let best = null, bd = Infinity;
+    (inside.length ? inside : ms).forEach(m => m.staves.forEach(st => st.events.forEach(e => {
+      const spots = e.notes.length ? e.notes.map(n => [n, n.photo || e.photo]) : [[null, e.photo]];
+      spots.forEach(([n, p]) => { if (!p) return; const dd = Math.hypot(x - p.x, y - p.y); if (dd < bd) { bd = dd; best = { e, n, m }; } });
+    })));
+    const limit = best && best.m.photoBox ? best.m.photoBox.pad * (inside.length ? 6 : 2) : 0;
+    return best && bd <= limit ? best : null;
+  }
   function onPaneClick(ev) {
     if (!state.score) return;
-    if (state.score.engine === 'homr' && ev.currentTarget.id === 'omrOrig') { $('omrSelInfo').textContent = 'Tap notes in the Recognised view to edit them.'; return; }
+    if (state.score.engine === 'homr' && ev.currentTarget.id === 'omrOrig') {
+      if (state.addMode || !hasPhotoBoxes()) { $('omrSelInfo').textContent = state.addMode ? 'Add mode: tap the recognised score where the note belongs.' : 'Tap notes in the Recognised view to edit them.'; return; }
+      const h = photoHit(ev);
+      state.sel = h ? { eventId: h.e.id, noteId: h.n ? h.n.id : null } : null;
+      renderPanes(); renderEditor();
+      return;
+    }
     const [x, y] = pagePoint(ev.currentTarget, ev);
     if (state.addMode) {
       const p = placeAt(x, y);
@@ -723,7 +760,7 @@
   function renderEditor() {
     const f = selected();
     $('omrEditor').classList.toggle('empty', !f);
-    if (!f) { $('omrSelInfo').textContent = state.addMode ? 'Add mode: tap the recognised score where the note belongs.' : (state.score && state.score.engine === 'homr' ? 'Tap a note or rest in the Recognised view to edit it.' : 'Tap a note or rest on either view to edit it.') + ' Red/amber measures need attention.'; return; }
+    if (!f) { $('omrSelInfo').textContent = state.addMode ? 'Add mode: tap the recognised score where the note belongs.' : (state.score && state.score.engine === 'homr' && !hasPhotoBoxes() ? 'Tap a note or rest in the Recognised view to edit it.' : 'Tap a note or rest on either view to edit it.') + ' Red/amber measures need attention.'; return; }
     const e = f.event, pitch = e.type === 'rest' ? 'Rest' : e.notes.map(n => (n === f.note ? '▸' : '') + (n.name || M.diatonicName(n.diatonic))).join(' + ');
     const d = f.measure.details.filter(x => x.staff === f.staffIndex);
     $('omrSelInfo').textContent = 'Measure ' + measureNumber(f.measure) + (f.measure.accepted ? ' (accepted)' : '') + ' · ' + (f.staff.clef === 'bass' ? 'bass (left hand)' : 'treble (right hand)') + ' · ' + pitch + ' · ' + DUR_LABEL[e.base] + (e.dots ? ' dotted' : '') + ' · voice ' + (e.voice || 1) + ' · confidence ' + Math.round((e.verified ? 1 : e.conf) * 100) + '% · beats ' + d.map(x => fmt(x.total) + '/' + fmt(x.expected) + (x.ok ? ' ✓' : ' ✖')).join(', ');
@@ -790,7 +827,7 @@
     ['omrOrig', 'omrRec'].forEach(idn => $(idn).addEventListener('click', onPaneClick));
     const a = $('omrOrigWrap'), b = $('omrRecWrap');
     let lock = false;
-    const sync = (src, dst) => () => { if (lock) return; lock = true; dst.scrollTop = src.scrollTop * (dst.scrollHeight / Math.max(1, src.scrollHeight)); requestAnimationFrame(() => { lock = false; }); };
+    const sync = (src, dst) => () => { if (lock || Date.now() < (state.syncPausedUntil || 0)) return; lock = true; dst.scrollTop = src.scrollTop * (dst.scrollHeight / Math.max(1, src.scrollHeight)); requestAnimationFrame(() => { lock = false; }); };
     a.addEventListener('scroll', sync(a, b)); b.addEventListener('scroll', sync(b, a));
     document.addEventListener('keydown', ev => {
       if (state.step !== 3 || !$('omr').classList.contains('active') || /INPUT|SELECT|TEXTAREA/.test(ev.target.tagName)) return;
@@ -828,10 +865,13 @@
   function focusMeasure(m) {
     if (m.page !== state.reviewPage) state.reviewPage = m.page;
     validateAndRender();
+    state.syncPausedUntil = Date.now() + 400; // each pane scrolls to its own copy of the bar
     ['omrOrigWrap', 'omrRecWrap'].forEach(idn => {
       const wrap = $(idn), cv = wrap.querySelector('canvas');
       if (!cv.clientHeight) return;
-      wrap.scrollTop = Math.max(0, m.y0 * (cv.clientHeight / state.score.pages[state.reviewPage].height) - 40);
+      const img = idn === 'omrOrigWrap' && state.score.engine === 'homr' ? homrPhoto() : null;
+      if (img && m.photoBox) wrap.scrollTop = Math.max(0, m.photoBox.y0 * (cv.clientHeight / img.height) - 40);
+      else wrap.scrollTop = Math.max(0, m.y0 * (cv.clientHeight / state.score.pages[state.reviewPage].height) - 40);
     });
   }
 
