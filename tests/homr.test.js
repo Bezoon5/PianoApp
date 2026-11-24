@@ -175,3 +175,23 @@ test('server addresses are normalised', () => {
   assert.equal(H.normaliseUrl('https://x.example/api/'), 'https://x.example/api');
   assert.equal(H.normaliseUrl(''), '');
 });
+
+test('a waking server is retried; real errors are not', async () => {
+  const realFetch = global.fetch;
+  try {
+    let calls = 0, retries = [];
+    global.fetch = async () => { calls++; if (calls < 3) throw new TypeError('Load failed'); return new Response(JSON.stringify({ ok: true, engine: 'homr', version: '0.7.1' }), { status: 200 }); };
+    const h = await H.health('srv.example', '', { retryMs: 1, onRetry: n => retries.push(n) });
+    assert.equal(h.version, '0.7.1'); assert.equal(calls, 3); assert.deepEqual(retries, [1, 2]);
+
+    calls = 0;
+    global.fetch = async () => { calls++; throw new TypeError('Load failed'); };
+    await assert.rejects(H.health('srv.example', '', { retryMs: 1 }), /could not reach/);
+    assert.equal(calls, 4, 'gives up after 4 tries');
+
+    calls = 0;
+    global.fetch = async () => { calls++; return new Response(JSON.stringify({ error: 'missing or wrong API key' }), { status: 401 }); };
+    await assert.rejects(H.health('srv.example', '', { retryMs: 1 }), /API key/);
+    assert.equal(calls, 1, 'server answers are not retried');
+  } finally { global.fetch = realFetch; }
+});

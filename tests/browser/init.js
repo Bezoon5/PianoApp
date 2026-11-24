@@ -1,4 +1,6 @@
 // Fake Web MIDI keyboard and a switch to make IndexedDB writes fail.
+// No built-in recognition server in tests: they must never call the real one.
+window.PC_DEFAULT_HOMR_URL = '';
 (function () {
   const input = { id: 'fake', onmidimessage: null };
   window.__midiSend = (st, note, vel) => input.onmidimessage && input.onmidimessage({ data: [st, note, vel] });

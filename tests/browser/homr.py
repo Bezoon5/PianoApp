@@ -51,13 +51,14 @@ def stub(path):
         await route.fulfill(path=os.path.join(HERE, path), content_type='text/javascript', headers={'Access-Control-Allow-Origin': '*'})
     return handler
 
-async def new_page(b, app):
+async def new_page(b, app, default_server=None):
     ctx = await b.new_context(viewport={'width': 1366, 'height': 1024}, service_workers='block')
     pg = await ctx.new_page()
     pg.set_default_timeout(15000)
     errs = []
     pg.on('pageerror', lambda e: errs.append(str(e)))
     await pg.add_init_script(path=os.path.join(HERE, 'init.js'))
+    if default_server: await pg.add_init_script('window.PC_DEFAULT_HOMR_URL = %r;' % default_server)
     await pg.route('**/tone/**', stub('tone-stub.js'))
     await pg.route('**/@tonejs/midi**', lambda r: r.abort())
     await pg.route('**/tesseract**', stub('tesseract-stub.js'))
@@ -181,7 +182,28 @@ async def main():
         check('no server set: AI option disabled with a hint, device selected', eng == 'homr:false:true,device:true:false' and 'Settings' in await pg.text_content('#omrEngineHint'), eng)
         await ctx.close()
 
-        # 5. Recognition failure on the server (422) also falls back
+        # 5. Built-in server: works with nothing set in Settings
+        ctx, pg, errs = await new_page(b, app, default_server=rec_url)
+        await go_library(pg)
+        await pg.click('#settings')
+        shown = await pg.input_value('#homrUrl'); st = await pg.text_content('#homrStatus')
+        check('built-in server: shown in Settings', shown == rec_url and 'built-in' in st, (shown, st))
+        await pg.click('#settingsDone')
+        await to_layout(pg, os.path.join(HERE, 'happy.png'))
+        eng = await pg.evaluate("[...document.querySelectorAll('input[name=omrEngine]')].map(r => r.value + ':' + r.checked).join(',')")
+        check('built-in server: AI recognition selected without any setup', eng == 'homr:true,device:false', eng)
+        await pg.wait_for_function("!document.getElementById('omrNext2').disabled", timeout=20000)
+        await pg.click('#omrNext2')
+        await pg.wait_for_function("/AI recognition: /.test(document.getElementById('omrReviewStatus').textContent)", timeout=60000)
+        check('built-in server: page recognised', '9 measures' in await pg.text_content('#omrReviewStatus'))
+        await pg.click('#omrClose')
+        await pg.click('#settings'); await pg.fill('#homrUrl', 'other.example'); await pg.locator('#homrUrl').dispatch_event('change')
+        check('built-in server: own address overrides it', await pg.evaluate("localStorage.getItem('pc-homr-url')") == 'https://other.example')
+        await pg.fill('#homrUrl', ''); await pg.locator('#homrUrl').dispatch_event('change')
+        check('built-in server: clearing the box goes back to it', await pg.evaluate("localStorage.getItem('pc-homr-url')") is None and await pg.input_value('#homrUrl') == rec_url)
+        await ctx.close()
+
+        # 6. Recognition failure on the server (422) also falls back
         rec.terminate(); rec.wait()
         rec, rec_url = start_recogniser(app, STUB_MODE='fail')
         ctx, pg, errs = await new_page(b, app)
